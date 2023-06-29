@@ -1,6 +1,5 @@
 import numpy as np
-import data_manager as dm
-import mem_manager as mm
+from .data_manager import *
 from multiprocessing.shared_memory import SharedMemory
 from fastplotlib import Plot, GridPlot
 
@@ -28,7 +27,7 @@ def create_grid_plot(num_channel):
 
 def initialize_plot():
     plot = create_plot()
-    xs, ys = dm.initialize_plot_data()
+    xs, ys = initialize_plot_data()
     plot_data = np.dstack([xs, ys])[0]
     plot.add_line(data=plot_data, name='data', cmap='jet')
     plot.auto_scale(maintain_aspect=False)
@@ -38,7 +37,7 @@ def initialize_plot():
 
 def initialize_grid_plot(num_channel):
     grid_plot = create_grid_plot(num_channel)
-    xs, ys = dm.initialize_grid_plot_data(num_channel)
+    xs, ys = initialize_grid_plot_data(num_channel)
     for i, subplot in enumerate(grid_plot):
         plot_data = np.dstack([xs, ys[i]])[0]
         subplot.add_line(data=plot_data, name='data', cmap='jet')
@@ -47,18 +46,23 @@ def initialize_grid_plot(num_channel):
 
 
 def obtain_plot_data(plot, mutex, shm_name, shape, dtype):
-    mm.acquire_mutex(mutex)
+    acquire_mutex(mutex)
     shm = SharedMemory(shm_name)
     data_shared = np.ndarray(shape=shape, dtype=dtype,
                              buffer=shm.buf)
     data = np.dstack([data_shared[0], data_shared[1]])[0]
-    mm.release_mutex(mutex)
+    release_mutex(mutex)
     plot['data'].data = data
     plot.auto_scale(maintain_aspect=False)
 
 
-def obtain_grid_plot_data(grid_plot, mutex, shm_name, shape, dtype):
-    mm.acquire_mutex(mutex)
+def obtain_grid_plot_data(args_dict):
+    grid_plot = args_dict["plot"]
+    mutex = args_dict["mutex"]
+    shm_name = args_dict["shm_name"]
+    shape = args_dict["shape"]
+    dtype = args_dict["dtype"]
+    acquire_mutex(mutex)
     shm = SharedMemory(shm_name)
     data_shared = np.ndarray(shape=shape, dtype=dtype,
                              buffer=shm.buf)
@@ -66,4 +70,4 @@ def obtain_grid_plot_data(grid_plot, mutex, shm_name, shape, dtype):
         data = np.dstack([data_shared[0], data_shared[i + 1]])[0]
         subplot['data'].data = data
         subplot.auto_scale(maintain_aspect=False)
-    mm.release_mutex(mutex)
+    release_mutex(mutex)

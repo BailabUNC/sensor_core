@@ -1,7 +1,7 @@
 import numpy as np
 from multiprocessing.shared_memory import SharedMemory
-import mem_manager as mm
-import ser_manager as sm
+from .mem_manager import *
+from .ser_manager import *
 
 
 def initialize_plot_data():
@@ -17,31 +17,37 @@ def initialize_grid_plot_data(num_channel):
     return xs, ys
 
 
-def update_data(ser, shm_name, mutex, window_length, shape, dtype, channel_key):
+def update_data(args_dict):
     idx = 0
-    if len(channel_key) != shape[0] - 1:
-        print("channel_key has incompatible number of channel labels")
-
+    ser = args_dict["ser"]
+    shm_name = args_dict["shm_name"]
+    mutex = args_dict["mutex"]
+    window_length = args_dict["window_length"]
+    shape = args_dict["shape"]
+    dtype = args_dict["dtype"]
+    channel_key = args_dict["channel_key"]
     while True:
-        ys = sm.acquire_data(ser, num_channel=shape[0]-1)
-        shm = SharedMemory(shm_name)
-        mm.acquire_mutex(mutex)
-        data_shared = np.ndarray(shape=shape, dtype=dtype,
-                                 buffer=shm.buf)
-        xs = data_shared[0][-window_length:]
-        data_shared[0][:-window_length] = data_shared[0][window_length:] - [window_length]
-        data_shared[0][-window_length:] = xs
-        if idx < 1000:
-            for i in range(shape[0] - 1):
-                data_shared[i + 1][:-window_length] = data_shared[i + 1][window_length:]
-                data_shared[i + 1][-window_length:] = ys[i]
-            idx += 1
+        ys = acquire_data(ser, num_channel=shape[0]-1)
+        if ys is None:
+            pass
         else:
-            for i in range(shape[0] - 1):
-                data_shared[i + 1][:-window_length] = data_shared[i + 1][window_length:]
-                data_shared[i + 1][-window_length:] = ys[i]
-                mm.save_data(key=channel_key[i], value=data_shared[i+1])
-            idx = 0
+            shm = SharedMemory(shm_name)
+            acquire_mutex(mutex)
+            data_shared = np.ndarray(shape=shape, dtype=dtype,
+                                     buffer=shm.buf)
+            xs = data_shared[0][-window_length:]
+            data_shared[0][:-window_length] = data_shared[0][window_length:] - [window_length]
+            data_shared[0][-window_length:] = xs
+            if idx < 1000:
+                for i in range(shape[0] - 1):
+                    data_shared[i + 1][:-window_length] = data_shared[i + 1][window_length:]
+                    data_shared[i + 1][-window_length:] = ys[i]
+                idx += 1
+            else:
+                for i in range(shape[0] - 1):
+                    data_shared[i + 1][:-window_length] = data_shared[i + 1][window_length:]
+                    data_shared[i + 1][-window_length:] = ys[i]
+                    save_data(key=channel_key[i], value=data_shared[i+1])
+                idx = 0
 
-        mm.release_mutex(mutex)
-
+            release_mutex(mutex)

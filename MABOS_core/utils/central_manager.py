@@ -1,16 +1,14 @@
-import data_manager as dm
-import mem_manager as mm
-import ser_manager as sm
-import plot_manager as pm
-from functools import partial
+from .data_manager import *
+from .mem_manager import *
+from .ser_manager import *
 import multiprocessing
 
 
-class CentralManger:
+class CentralManager:
     def __init__(self, channel_key, commport, window_length=1, baudrate=115200):
-        mutex = mm.create_mutex()
-        ser = sm.setup_serial(commport, baudrate)
-        self.shm, data_shared, plot = mm.create_shared_block(grid_plot_flag=True, channel_key=channel_key)
+        mutex = create_mutex()
+        ser = setup_serial(commport, baudrate)
+        self.shm, data_shared, plot = create_shared_block(grid_plot_flag=True, channel_key=channel_key)
 
         self.args_dict = {
             "channel_key": channel_key,
@@ -26,7 +24,7 @@ class CentralManger:
         }
 
     def update_process(self):
-        p1 = multiprocessing.Process(name='update',
-                                     target=dm.update_data,
-                                     args=(self.args_dict,))
-        return p1
+        p = multiprocessing.Process(name='update',
+                                    target=update_data,
+                                    args=(self.args_dict,))
+        return p
