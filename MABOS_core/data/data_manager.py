@@ -1,7 +1,6 @@
 import numpy as np
-from multiprocessing.shared_memory import SharedMemory
-from .mem_manager import *
-from .ser_manager import *
+import MABOS_core.memory.mem_manager as mm
+import MABOS_core.serial.ser_manager as sm
 
 
 def initialize_plot_data():
@@ -27,12 +26,12 @@ def update_data(args_dict):
     dtype = args_dict["dtype"]
     channel_key = args_dict["channel_key"]
     while True:
-        ys = acquire_data(ser, num_channel=shape[0]-1)
+        ys = sm.acquire_data(ser, num_channel=shape[0]-1)
         if ys is None:
             pass
         else:
-            shm = SharedMemory(shm_name)
-            acquire_mutex(mutex)
+            shm = mm.SharedMemory(shm_name)
+            mm.acquire_mutex(mutex)
             data_shared = np.ndarray(shape=shape, dtype=dtype,
                                      buffer=shm.buf)
             xs = data_shared[0][-window_length:]
@@ -47,7 +46,7 @@ def update_data(args_dict):
                 for i in range(shape[0] - 1):
                     data_shared[i + 1][:-window_length] = data_shared[i + 1][window_length:]
                     data_shared[i + 1][-window_length:] = ys[i]
-                    save_data(key=channel_key[i], value=data_shared[i+1])
+                    mm.save_data(key=channel_key[i], value=data_shared[i+1])
                 idx = 0
 
-            release_mutex(mutex)
+            mm.release_mutex(mutex)

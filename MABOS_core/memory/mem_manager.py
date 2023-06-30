@@ -1,6 +1,6 @@
 import multiprocessing
 from multiprocessing.shared_memory import SharedMemory
-from .plot_manager import *
+import MABOS_core.plot.plot_manager as pm
 import numpy as np
 from sqlitedict import SqliteDict
 
@@ -26,9 +26,9 @@ def release_mutex(mutex):
 
 def create_shared_block(channel_key, grid_plot_flag=False, dtype=np.int64):
     if grid_plot_flag:
-        plot, data = initialize_grid_plot(num_channel=len(channel_key))
+        plot, data = pm.initialize_grid_plot(num_channel=len(channel_key))
     else:
-        plot, data = initialize_plot()
+        plot, data = pm.initialize_plot()
 
     shm = SharedMemory(create=True, size=data.nbytes)
     data_shared = np.ndarray(shape=data.shape,
