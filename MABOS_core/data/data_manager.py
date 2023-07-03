@@ -29,6 +29,8 @@ def update_data(args_dict):
         ys = sm.acquire_data(ser, num_channel=shape[0]-1)
         if ys is None:
             pass
+        elif any(ys == 0):
+            pass
         else:
             shm = mm.SharedMemory(shm_name)
             mm.acquire_mutex(mutex)
@@ -41,12 +43,14 @@ def update_data(args_dict):
                 for i in range(shape[0] - 1):
                     data_shared[i + 1][:-window_length] = data_shared[i + 1][window_length:]
                     data_shared[i + 1][-window_length:] = ys[i]
+                    if ys[i] == 0:
+                        print("false 0")
                 idx += 1
             else:
                 for i in range(shape[0] - 1):
                     data_shared[i + 1][:-window_length] = data_shared[i + 1][window_length:]
                     data_shared[i + 1][-window_length:] = ys[i]
-                    mm.save_data(key=channel_key[i], value=data_shared[i+1])
+                    mm.save_data(key=channel_key[i], value=data_shared[i+1][:])
                 idx = 0
 
             mm.release_mutex(mutex)
