@@ -1,7 +1,7 @@
 from .utils.central_manager import CentralManager
-from .utils import plot_manager
+from .plot.plot_manager import *
 
 __all__ = [
     "CentralManager",
-    "plot_manager"
+    "plot"
 ]

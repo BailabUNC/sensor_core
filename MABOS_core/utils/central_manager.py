@@ -1,6 +1,6 @@
-from .data_manager import *
-from .mem_manager import *
-from .ser_manager import *
+from MABOS_core.data.data_manager import *
+from MABOS_core.memory.mem_manager import *
+from MABOS_core.serial.ser_manager import *
 import multiprocessing
 
 
