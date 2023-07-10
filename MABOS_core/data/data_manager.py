@@ -12,7 +12,6 @@ def initialize_plot_data():
 def initialize_grid_plot_data(num_channel):
     xs = [np.linspace(0, 999, 1000)]
     ys = np.ones((num_channel, 1000)) * np.linspace(0, 1, 1000)
-    # ys = np.array(np.random.randint(0, 1000, size=(3, 1000)))
     return xs, ys
 
 
@@ -27,9 +26,7 @@ def update_data(args_dict):
     channel_key = args_dict["channel_key"]
     while True:
         ys = sm.acquire_data(ser, num_channel=shape[0]-1)
-        if ys is None:
-            pass
-        elif any(ys == 0):
+        if ys is None or any(ys == 0):
             pass
         else:
             shm = mm.SharedMemory(shm_name)

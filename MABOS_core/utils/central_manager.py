@@ -2,6 +2,8 @@ from MABOS_core.data.data_manager import *
 from MABOS_core.memory.mem_manager import *
 from MABOS_core.serial.ser_manager import *
 import multiprocessing
+import threading
+import os
 
 
 class CentralManager:
@@ -24,7 +26,12 @@ class CentralManager:
         }
 
     def update_process(self):
-        p = multiprocessing.Process(name='update',
+        if os.name == 'nt':
+            p = threading.Thread(name='update',
                                     target=update_data,
                                     args=(self.args_dict,))
+        else:
+            p = multiprocessing.Process(name='update',
+                                        target=update_data,
+                                        args=(self.args_dict,))
         return p
