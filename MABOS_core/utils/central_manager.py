@@ -7,16 +7,19 @@ import os
 
 
 class CentralManager:
-    def __init__(self, channel_key, commport, window_length=1, baudrate=115200):
+    def __init__(self, channel_key, commport, num_points, window_size=1, baudrate=115200):
         mutex = create_mutex()
         ser = setup_serial(commport, baudrate)
-        self.shm, data_shared, plot = create_shared_block(grid_plot_flag=True, channel_key=channel_key)
+        self.shm, data_shared, plot = create_shared_block(grid_plot_flag=True,
+                                                          channel_key=channel_key,
+                                                          num_points=num_points)
 
         self.args_dict = {
             "channel_key": channel_key,
             "commport": commport,
             "baudrate": baudrate,
-            "window_length": window_length,
+            "num_points": num_points,
+            "window_size": window_size,
             "mutex": mutex,
             "ser": ser,
             "shm_name": self.shm.name,

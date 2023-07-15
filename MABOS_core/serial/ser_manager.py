@@ -55,7 +55,7 @@ def acquire_data(ser, num_channel, window_size=1, EOL=None):
     :param num_channel: number of distinct channels
     :param window_size: for 1D data, number of timepoints to acquire before passing
     :param EOL: end of line phrase used to separate timepoints
-    :return: channel data
+    :return: channel data [shape: (window_size, num_channel)]
     """
     ser_data = np.zeros(window_size, num_channel)
     channel_data = np.array([])
