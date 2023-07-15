@@ -31,7 +31,7 @@ def release_mutex(mutex):
     mutex.release()
 
 
-def create_shared_block(channel_key: Union[np.ndarray, str], num_points: int, save_data: bool = True,
+def create_shared_block(channel_key: Union[np.ndarray, str], num_points: int = 1000, save_data: bool = True,
                         grid_plot_flag: bool = True, dtype=np.int64):
     """ Create Shared Memory Block for global access to streamed data
 

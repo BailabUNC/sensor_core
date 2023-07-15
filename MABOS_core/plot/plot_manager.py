@@ -13,12 +13,14 @@ def initialize_plot(channel_key, num_points, grid_plot_flag):
     """
 
     if grid_plot_flag:
-        _initialize_grid_plot(channel_key=channel_key, num_points=num_points)
+        grid_plot, data = _initialize_grid_plot(channel_key=channel_key, num_points=num_points)
+        return grid_plot, data
     else:
         if len(channel_key) != 1:
             raise ValueError(f"Channel key {channel_key} must have only one element if using Plot")
         else:
-            _initialize_plot(channel_key=channel_key, num_points=num_points)
+            plot, data = _initialize_plot(channel_key=channel_key, num_points=num_points)
+            return plot, data
 
 
 def _initialize_plot(channel_key, num_points):

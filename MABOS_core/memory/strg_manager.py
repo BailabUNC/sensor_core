@@ -2,7 +2,7 @@ from sqlitedict import SqliteDict
 import numpy as np
 
 
-def _save_channel(key: str, value: np.ndarray, cache_file: str = "cache.sqlite3"):
+def _save_channel(key: str, value: np.ndarray or list, cache_file: str = "cache.sqlite3"):
     """ Save array to SQL Dictionary w/ key
 
     :param key: dictionary key to save array to
@@ -14,7 +14,7 @@ def _save_channel(key: str, value: np.ndarray, cache_file: str = "cache.sqlite3"
             mydict[key] = value  # Using dict[key] to store
             mydict.commit()  # Need to commit() to actually flush the data
     except Exception as ex:
-        print("Error during storing data (Possibly unsupported):", ex)
+        print("Error during saving data:", ex)
 
 
 def _load_channel(key: str, cache_file: str = "cache.sqlite3"):
@@ -32,7 +32,7 @@ def _load_channel(key: str, cache_file: str = "cache.sqlite3"):
         print("Error during loading data:", ex)
 
 
-def append_channel(key: str, value: np.ndarray, cache_file: str = "cache.sqlite3"):
+def append_channel(key: str, value: np.ndarray or list, cache_file: str = "cache.sqlite3"):
     """ Append new data to existing dictionary key
 
     :param key: dictionary key to load and append to existing array
@@ -41,8 +41,9 @@ def append_channel(key: str, value: np.ndarray, cache_file: str = "cache.sqlite3
     """
     try:
         data = _load_channel(key, cache_file)
-        data.append(value)
+        data = np.append(data[:], value)
         _save_channel(key, data, cache_file)
+
     except Exception as ex:
         print("Error during saving data", ex)
 
