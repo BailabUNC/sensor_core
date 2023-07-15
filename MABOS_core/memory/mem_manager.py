@@ -4,7 +4,6 @@ from multiprocessing.shared_memory import SharedMemory
 import MABOS_core.plot.plot_manager as pm
 from .strg_manager import _save_channel
 import numpy as np
-from sqlitedict import SqliteDict
 
 
 def create_mutex():
