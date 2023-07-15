@@ -1,7 +1,13 @@
-from .utils.central_manager import CentralManager
-from .plot.plot_manager import *
+from .sensor_manager import SensorManager
+from .data import *
+from .memory import *
+from .plot import *
+from .serial import *
 
 __all__ = [
-    "CentralManager",
-    "plot"
+    "SensorManager",
+    "data",
+    "memory",
+    "plot",
+    "serial"
 ]

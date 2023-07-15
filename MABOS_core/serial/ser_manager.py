@@ -48,16 +48,16 @@ def find_serial():
     return result
 
 
-def acquire_data(ser, num_channel, window_size=1, EOL=None):
+def acquire_data(ser, num_channel: int, window_size=1, EOL=None):
     """ Acquire serial port data
     Confirms validity of incoming data
     :param ser: serial object
     :param num_channel: number of distinct channels
     :param window_size: for 1D data, number of timepoints to acquire before passing
     :param EOL: end of line phrase used to separate timepoints
-    :return: channel data
+    :return: channel data [shape: (window_size, num_channel)]
     """
-    ser_data = np.zeros(window_size, num_channel)
+    ser_data = np.zeros((window_size, num_channel))
     channel_data = np.array([])
     # Decode incoming data into ser_data array
     if EOL is None:
@@ -74,7 +74,8 @@ def acquire_data(ser, num_channel, window_size=1, EOL=None):
         if any(ser_data[i, :] == 0):
             pass
         else:
-            np.append(channel_data, ser_data[i, :])
+            channel_data = np.append(channel_data, ser_data[i][:])
+    channel_data = np.reshape(channel_data, (int(len(channel_data)/num_channel),num_channel))
     if channel_data.size > 0:
         return channel_data
     else:
