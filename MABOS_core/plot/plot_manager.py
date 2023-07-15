@@ -41,7 +41,7 @@ def initialize_grid_plot(channel_key):
     xs, ys = dm.initialize_grid_plot_data(len(channel_key))
     for i, subplot in enumerate(grid_plot):
         plot_data = np.dstack([xs, ys[i]])[0]
-        subplot.add_line(data=plot_data, name=channel_key[i], cmap='jet')
+        subplot.add_line(data=plot_data, name=channel_key[i], cmap='viridis')
     data = np.vstack((xs, ys))
     return grid_plot, data
 

@@ -28,8 +28,8 @@ class CentralManager:
     def update_process(self):
         if os.name == 'nt':
             p = threading.Thread(name='update',
-                                    target=update_data,
-                                    args=(self.args_dict,))
+                                 target=update_data,
+                                 args=(self.args_dict,))
         else:
             p = multiprocessing.Process(name='update',
                                         target=update_data,
