@@ -1,9 +1,11 @@
 import MABOS_core.memory.mem_manager as mm
 from ._plot_utils import *
+from typing import *
 from multiprocessing.shared_memory import SharedMemory
 
 
-def initialize_plot(channel_key, num_points, grid_plot_flag):
+
+def initialize_plot(channel_key: Union[np.ndarray, str], num_points: int, grid_plot_flag: bool):
     """ Handler for initializing Plot/GridPlot
 
     :param channel_key: user-defined channel name
@@ -23,7 +25,7 @@ def initialize_plot(channel_key, num_points, grid_plot_flag):
             return plot, data
 
 
-def _initialize_plot(channel_key, num_points):
+def _initialize_plot(channel_key: Union[np.ndarray, str], num_points: int):
     """ Initialize Plot object and data
 
     :param channel_key: user-defined channel name
@@ -39,7 +41,7 @@ def _initialize_plot(channel_key, num_points):
     return plot, data
 
 
-def _initialize_grid_plot(channel_key, num_points):
+def _initialize_grid_plot(channel_key: Union[np.ndarray, str], num_points: int):
     """ Initialize GridPlot object and data
 
     :param channel_key: user-defined channel name
@@ -55,7 +57,7 @@ def _initialize_grid_plot(channel_key, num_points):
     return grid_plot, data
 
 
-def obtain_plot_data(args_dict):
+def obtain_plot_data(args_dict: dict):
     """ Update Plot data with shared memory object data
 
     :param args_dict: dictionary containing kwargs for memory and plot management
@@ -79,7 +81,7 @@ def obtain_plot_data(args_dict):
     mm.release_mutex(mutex)
 
 
-def obtain_grid_plot_data(args_dict):
+def obtain_grid_plot_data(args_dict: dict):
     """ Update GridPlot data with shared memory object data
 
     :param args_dict: dictionary containing kwargs for memory and plot management

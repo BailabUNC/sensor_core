@@ -1,8 +1,9 @@
 import numpy as np
+from typing import *
 from fastplotlib import Plot, GridPlot
 
 
-def create_plot(channel_key):
+def create_plot(channel_key: Union[np.ndarray, str]):
     """ Create fastplotlib Plot
 
     :param channel_key: name of plot (should only have one element)
@@ -17,7 +18,7 @@ def create_plot(channel_key):
     return plot
 
 
-def create_grid_plot(channel_key):
+def create_grid_plot(channel_key: Union[np.ndarray, str]):
     """ Create fastplotlib GridPlot (collection of subplots)
 
     :param channel_key: names of subplots
@@ -33,7 +34,7 @@ def create_grid_plot(channel_key):
     return grid_plot
 
 
-def initialize_plot_data(num_points):
+def initialize_plot_data(num_points: int):
     """ Initialize Plot data
 
     :param num_points: number of 'time' points [num_points = time(s) * Hz]
@@ -44,7 +45,7 @@ def initialize_plot_data(num_points):
     return xs, ys
 
 
-def initialize_grid_plot_data(num_channel, num_points):
+def initialize_grid_plot_data(num_channel: Union[np.ndarray, str], num_points: int):
     """ Initialize GridPlot data
 
     :param num_channel: number of distinct channels
