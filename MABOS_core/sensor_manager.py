@@ -2,6 +2,7 @@ from MABOS_core.data.data_manager import *
 from MABOS_core.memory.mem_manager import *
 from MABOS_core.serial.ser_manager import *
 import multiprocessing
+from warnings import warn
 import threading
 import os
 
@@ -19,7 +20,7 @@ class SensorManager:
         """
         mutex = create_mutex()
         self.ser = setup_serial(commport, baudrate)
-
+        self.window_size = window_size
         self.shm, data_shared, self.plot = create_shared_block(grid_plot_flag=True,
                                                                channel_key=channel_key,
                                                                num_points=num_points)
@@ -28,8 +29,6 @@ class SensorManager:
             "channel_key": channel_key,
             "commport": commport,
             "baudrate": baudrate,
-            "num_points": num_points,
-            "window_size": window_size,
             "mutex": mutex,
             "ser": self.ser,
             "shm_name": self.shm.name,
@@ -37,6 +36,12 @@ class SensorManager:
             "shape": data_shared.shape,
             "dtype": data_shared.dtype
         }
+
+        self.dynamic_args_dict = {
+            "num_points": num_points,
+            "window_size": self.window_size
+        }
+        self.q1 = self.setup_queue()
 
     def update_process(self, save_data: bool = True):
         """ Initialize dedicated process to update data
@@ -47,9 +52,40 @@ class SensorManager:
         if save_data:
             p = multiprocessing.Process(name='update',
                                         target=update_save_data,
-                                        args=(self.args_dict,))
+                                        args=(self.args_dict, self.q1,))
         else:
             p = multiprocessing.Process(name='update',
                                         target=update_data,
-                                        args=(self.args_dict,))
+                                        args=(self.args_dict, self.q1,))
         return p
+
+    def update_params(self, params: dict):
+        """ Check validity and update parameters
+
+        :param params: dictionary of parameters to update
+        :return: updates queue with new dictionary
+        """
+        master_keys = self.dynamic_args_dict.keys()
+        for param_key in params.keys():
+            if param_key in master_keys:
+                self.dynamic_args_dict[f"{param_key}"] = params[f"{param_key}"]
+                self.update_queue(self.q1)
+            else:
+                warn(f"Parameter key {param_key} does not exist in dynamic parameter dictionary\n"
+                     f"{self.dynamic_args_dict}")
+
+    def setup_queue(self):
+        """ Setup queue to hold dynamic parameter dictionaries
+
+        :return: queue object
+        """
+        q = multiprocessing.Queue()
+        q.put(self.dynamic_args_dict)
+        return q
+
+    def update_queue(self, q):
+        """ Adding item to existing queue object
+
+        :param q: Queue object
+        """
+        q.put(self.dynamic_args_dict)

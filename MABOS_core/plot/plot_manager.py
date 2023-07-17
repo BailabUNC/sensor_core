@@ -4,7 +4,6 @@ from typing import *
 from multiprocessing.shared_memory import SharedMemory
 
 
-
 def initialize_plot(channel_key: Union[np.ndarray, str], num_points: int, grid_plot_flag: bool):
     """ Handler for initializing Plot/GridPlot
 
