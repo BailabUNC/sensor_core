@@ -19,5 +19,6 @@ pip install -e .
 ```
 ## Acquiring, Plotting, and Saving Data in Real-Time
 The following data was captured by [MABOS](https://github.com/BailabUNC/MABOS/tree/master): a proprietary biosensor we developed. 
+
 https://github.com/BailabUNC/MABOS_core/assets/96029511/cbcf4896-62dc-4e1d-8ed4-9be6ac47196a
 
