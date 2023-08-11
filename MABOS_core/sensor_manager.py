@@ -49,6 +49,9 @@ class SensorManager:
         :param save_data: boolean flag. If true, save acquired data to file and RAM, if not just update it in RAM
         :return: pointer to process
         """
+        # Ensures all resources available to parent process are identical to child process. Needed for windows & macOS
+        multiprocessing.set_start_method('fork')
+
         if save_data:
             p = multiprocessing.Process(name='update',
                                         target=update_save_data,
