@@ -18,7 +18,12 @@ class SensorManager:
         :param window_size: for 1D data, number of timepoints to acquire before passing
         :param baudrate: target baudrate
         """
+
+        # Ensures all resources available to parent process are identical to child process. Needed for windows & macOS
+        multiprocessing.set_start_method('fork')
+
         mutex = create_mutex()
+
         self.ser = setup_serial(commport, baudrate)
         self.window_size = window_size
         self.shm, data_shared, self.plot = create_shared_block(grid_plot_flag=True,
@@ -49,6 +54,7 @@ class SensorManager:
         :param save_data: boolean flag. If true, save acquired data to file and RAM, if not just update it in RAM
         :return: pointer to process
         """
+
         if save_data:
             p = multiprocessing.Process(name='update',
                                         target=update_save_data,
