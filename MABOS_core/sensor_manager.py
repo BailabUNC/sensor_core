@@ -20,7 +20,7 @@ class SensorManager:
         """
 
         # Ensures all resources available to parent process are identical to child process. Needed for windows & macOS
-        multiprocessing.set_start_method('fork')
+        multiprocessing.set_start_method('fork', force = True)
 
         mutex = create_mutex()
 
