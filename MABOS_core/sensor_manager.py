@@ -2,18 +2,34 @@ from MABOS_core.data.data_manager import *
 from MABOS_core.memory.mem_manager import *
 from MABOS_core.serial.ser_manager import *
 import multiprocessing
-from warnings import warn
+from multiprocessing import freeze_support
 import threading
+from warnings import warn
 import os
 
 
 def setup_process_start_method():
+    """ Set up multiprocessing start method based on operating system
+
+    """
     if sys.platform.startswith('win'):
         multiprocessing.set_start_method("spawn", force=True)
     elif sys.platform.startswith('linux') or sys.platform.startswith('cygwin') or sys.platform.startswith('darwin'):
         multiprocessing.set_start_method("fork", force=True)
     else:
         raise EnvironmentError('Unsupported platform')
+
+def start_process(process):
+    """ Function to start given process, and ensure safe operability with windows
+
+    :param process: process object to start
+    """
+    if sys.platform.startswith('win'):
+        freeze_support()
+        process.start()
+    else:
+        process.start()
+
 
 class SensorManager:
     def __init__(self, channel_key: Union[np.ndarray, str], commport: str, num_points: int = 1000,
@@ -38,7 +54,7 @@ class SensorManager:
                                                                channel_key=channel_key,
                                                                num_points=num_points)
 
-        self.args_dict = {
+        self.static_args_dict = {
             "channel_key": channel_key,
             "commport": commport,
             "baudrate": baudrate,
@@ -54,23 +70,32 @@ class SensorManager:
             "num_points": num_points,
             "window_size": self.window_size
         }
-        self.q1 = self.setup_queue()
+        self.dynamic_queue = self.setup_queue(type="dynamic")
 
-    def update_process(self, save_data: bool = True):
+    def update_data_process(self, save_data: bool = True):
         """ Initialize dedicated process to update data
 
         :param save_data: boolean flag. If true, save acquired data to file and RAM, if not just update it in RAM
         :return: pointer to process
         """
-
-        if save_data:
-            p = multiprocessing.Process(name='update',
-                                        target=update_save_data,
-                                        args=(self.args_dict, self.q1,))
+        if sys.platform.startswith('win'):
+            if save_data:
+                p = threading.Thread(name='update',
+                                    target=update_save_data,
+                                    args=(self.static_args_dict, self.dynamic_queue,))
+            else:
+                p = threading.Thread(name='update',
+                                     target=update_data,
+                                     args=(self.static_args_dict, self.dynamic_queue,))
         else:
-            p = multiprocessing.Process(name='update',
-                                        target=update_data,
-                                        args=(self.args_dict, self.q1,))
+            if save_data:
+                p = multiprocessing.Process(name='update',
+                                            target=update_save_data,
+                                            args=(self.static_args_dict, self.dynamic_queue,))
+            else:
+                p = multiprocessing.Process(name='update',
+                                            target=update_data,
+                                            args=(self.static_args_dict, self.dynamic_queue,))
         return p
 
     def update_params(self, params: dict):
@@ -83,18 +108,25 @@ class SensorManager:
         for param_key in params.keys():
             if param_key in master_keys:
                 self.dynamic_args_dict[f"{param_key}"] = params[f"{param_key}"]
-                self.update_queue(self.q1)
+                self.update_queue(self.dynamic_queue)
             else:
                 warn(f"Parameter key {param_key} does not exist in dynamic parameter dictionary\n"
                      f"{self.dynamic_args_dict}")
 
-    def setup_queue(self):
+    def setup_queue(self, type: str = "dynamic"):
         """ Setup queue to hold dynamic parameter dictionaries
 
+        :param type: string, determines if queue contains static or dynamic dictionary
         :return: queue object
         """
         q = multiprocessing.Queue()
-        q.put(self.dynamic_args_dict)
+
+        if type == "static":
+            q.put(self.static_args_dict)
+        elif type == "dynamic":
+            q.put(self.dynamic_args_dict)
+        else:
+            warn(f"Unable to setup queue; type argument {type} must be 'static' or 'dynamic'")
         return q
 
     def update_queue(self, q):
