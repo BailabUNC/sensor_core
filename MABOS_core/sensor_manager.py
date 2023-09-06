@@ -2,19 +2,34 @@ from MABOS_core.data.data_manager import *
 from MABOS_core.memory.mem_manager import *
 from MABOS_core.serial.ser_manager import *
 import multiprocessing
-from warnings import warn
+from multiprocessing import freeze_support
 import threading
+from warnings import warn
 import os
-import ctypes
 
 
 def setup_process_start_method():
+    """ Set up multiprocessing start method based on operating system
+
+    """
     if sys.platform.startswith('win'):
         multiprocessing.set_start_method("spawn", force=True)
     elif sys.platform.startswith('linux') or sys.platform.startswith('cygwin') or sys.platform.startswith('darwin'):
         multiprocessing.set_start_method("fork", force=True)
     else:
         raise EnvironmentError('Unsupported platform')
+
+def start_process(process):
+    """ Function to start given process, and ensure safe operability with windows
+
+    :param process: process object to start
+    """
+    if sys.platform.startswith('win'):
+        freeze_support()
+        process.start()
+    else:
+        process.start()
+
 
 class SensorManager:
     def __init__(self, channel_key: Union[np.ndarray, str], commport: str, num_points: int = 1000,
@@ -63,24 +78,25 @@ class SensorManager:
         :param save_data: boolean flag. If true, save acquired data to file and RAM, if not just update it in RAM
         :return: pointer to process
         """
-
-        if save_data:
-            p = multiprocessing.Process(name='update',
-                                        target=update_save_data,
-                                        args=(self.static_args_dict, self.dynamic_queue,))
-        else:
-            p = multiprocessing.Process(name='update',
-                                        target=update_data,
-                                        args=(self.static_args_dict, self.dynamic_queue,))
-        return p
-
-    def start_process(self, process):
         if sys.platform.startswith('win'):
-            if __name__ == '__main__':
-                freeze_support()
-                process.start()
+            if save_data:
+                p = threading.Thread(name='update',
+                                    target=update_save_data,
+                                    args=(self.static_args_dict, self.dynamic_queue,))
+            else:
+                p = threading.Thread(name='update',
+                                     target=update_data,
+                                     args=(self.static_args_dict, self.dynamic_queue,))
         else:
-            process.start()
+            if save_data:
+                p = multiprocessing.Process(name='update',
+                                            target=update_save_data,
+                                            args=(self.static_args_dict, self.dynamic_queue,))
+            else:
+                p = multiprocessing.Process(name='update',
+                                            target=update_data,
+                                            args=(self.static_args_dict, self.dynamic_queue,))
+        return p
 
     def update_params(self, params: dict):
         """ Check validity and update parameters
@@ -92,7 +108,7 @@ class SensorManager:
         for param_key in params.keys():
             if param_key in master_keys:
                 self.dynamic_args_dict[f"{param_key}"] = params[f"{param_key}"]
-                self.update_queue(self.q1)
+                self.update_queue(self.dynamic_queue)
             else:
                 warn(f"Parameter key {param_key} does not exist in dynamic parameter dictionary\n"
                      f"{self.dynamic_args_dict}")
