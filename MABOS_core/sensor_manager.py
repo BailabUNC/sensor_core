@@ -5,6 +5,7 @@ import multiprocessing
 from warnings import warn
 import threading
 import os
+import ctypes
 
 
 def setup_process_start_method():
@@ -38,7 +39,7 @@ class SensorManager:
                                                                channel_key=channel_key,
                                                                num_points=num_points)
 
-        self.args_dict = {
+        self.static_args_dict = {
             "channel_key": channel_key,
             "commport": commport,
             "baudrate": baudrate,
@@ -54,9 +55,9 @@ class SensorManager:
             "num_points": num_points,
             "window_size": self.window_size
         }
-        self.q1 = self.setup_queue()
+        self.dynamic_queue = self.setup_queue(type="dynamic")
 
-    def update_process(self, save_data: bool = True):
+    def update_data_process(self, save_data: bool = True):
         """ Initialize dedicated process to update data
 
         :param save_data: boolean flag. If true, save acquired data to file and RAM, if not just update it in RAM
@@ -66,12 +67,20 @@ class SensorManager:
         if save_data:
             p = multiprocessing.Process(name='update',
                                         target=update_save_data,
-                                        args=(self.args_dict, self.q1,))
+                                        args=(self.static_args_dict, self.dynamic_queue,))
         else:
             p = multiprocessing.Process(name='update',
                                         target=update_data,
-                                        args=(self.args_dict, self.q1,))
+                                        args=(self.static_args_dict, self.dynamic_queue,))
         return p
+
+    def start_process(self, process):
+        if sys.platform.startswith('win'):
+            if __name__ == '__main__':
+                freeze_support()
+                process.start()
+        else:
+            process.start()
 
     def update_params(self, params: dict):
         """ Check validity and update parameters
@@ -88,13 +97,20 @@ class SensorManager:
                 warn(f"Parameter key {param_key} does not exist in dynamic parameter dictionary\n"
                      f"{self.dynamic_args_dict}")
 
-    def setup_queue(self):
+    def setup_queue(self, type: str = "dynamic"):
         """ Setup queue to hold dynamic parameter dictionaries
 
+        :param type: string, determines if queue contains static or dynamic dictionary
         :return: queue object
         """
         q = multiprocessing.Queue()
-        q.put(self.dynamic_args_dict)
+
+        if type == "static":
+            q.put(self.static_args_dict)
+        elif type == "dynamic":
+            q.put(self.dynamic_args_dict)
+        else:
+            warn(f"Unable to setup queue; type argument {type} must be 'static' or 'dynamic'")
         return q
 
     def update_queue(self, q):
