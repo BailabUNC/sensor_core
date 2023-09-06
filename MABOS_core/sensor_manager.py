@@ -7,6 +7,14 @@ import threading
 import os
 
 
+def setup_process_start_method():
+    if sys.platform.startswith('win'):
+        multiprocessing.set_start_method("spawn", force=True)
+    elif sys.platform.startswith('linux') or sys.platform.startswith('cygwin') or sys.platform.startswith('darwin'):
+        multiprocessing.set_start_method("fork", force=True)
+    else:
+        raise EnvironmentError('Unsupported platform')
+
 class SensorManager:
     def __init__(self, channel_key: Union[np.ndarray, str], commport: str, num_points: int = 1000,
                  window_size: int = 1, baudrate: int = 115200):
@@ -20,7 +28,7 @@ class SensorManager:
         """
 
         # Ensures all resources available to parent process are identical to child process. Needed for windows & macOS
-        multiprocessing.set_start_method('fork', force = True)
+        setup_process_start_method()
 
         mutex = create_mutex()
 
