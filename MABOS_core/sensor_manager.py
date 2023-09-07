@@ -14,10 +14,13 @@ def setup_process_start_method():
     """
     if sys.platform.startswith('win'):
         multiprocessing.set_start_method("spawn", force=True)
+        os_flag = 'win'
     elif sys.platform.startswith('linux') or sys.platform.startswith('cygwin') or sys.platform.startswith('darwin'):
         multiprocessing.set_start_method("fork", force=True)
+        os_flag = 'unix'
     else:
         raise EnvironmentError('Unsupported platform')
+    return os_flag
 
 
 class SensorManager:
@@ -28,12 +31,12 @@ class SensorManager:
         :param channel_key: list of channel names
         :param commport: target serial port
         :param num_points: number of 'time' points [num_points = time(s) * Hz]
-        :param window_size: for 1D data, number of timepoints to acquire before passing
+        :param window_size: for 1D data, number of time points to acquire before passing
         :param baudrate: target baudrate
         """
 
         # Ensures all resources available to parent process are identical to child process. Needed for windows & macOS
-        setup_process_start_method()
+        self.os_flag = setup_process_start_method()
 
         mutex = create_mutex()
 
@@ -67,7 +70,7 @@ class SensorManager:
         :param save_data: boolean flag. If true, save acquired data to file and RAM, if not just update it in RAM
         :return: pointer to process
         """
-        if sys.platform.startswith('win'):
+        if self.os_flag == 'win':
             if save_data:
                 p = threading.Thread(name='update',
                                     target=update_save_data,
@@ -90,7 +93,7 @@ class SensorManager:
     def update_params(self, params: dict):
         """ Check validity and update parameters
 
-        :param params: dictionary of parameters to update
+        :param params: dictionary of parameters to update. By default, set to dynamic args dict.
         :return: updates queue with new dictionary
         """
         master_keys = self.dynamic_args_dict.keys()
@@ -130,7 +133,7 @@ class SensorManager:
 
         :param process: process object to start
         """
-        if sys.platform.startswith('win'):
+        if self.os_flag == 'win':
             freeze_support()
             process.start()
         else:
