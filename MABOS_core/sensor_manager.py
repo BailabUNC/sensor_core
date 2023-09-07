@@ -19,17 +19,6 @@ def setup_process_start_method():
     else:
         raise EnvironmentError('Unsupported platform')
 
-def start_process(process):
-    """ Function to start given process, and ensure safe operability with windows
-
-    :param process: process object to start
-    """
-    if sys.platform.startswith('win'):
-        freeze_support()
-        process.start()
-    else:
-        process.start()
-
 
 class SensorManager:
     def __init__(self, channel_key: Union[np.ndarray, str], commport: str, num_points: int = 1000,
@@ -135,3 +124,14 @@ class SensorManager:
         :param q: Queue object
         """
         q.put(self.dynamic_args_dict)
+
+    def start_process(self, process):
+        """ Function to start given process, and ensure safe operability with windows
+
+        :param process: process object to start
+        """
+        if sys.platform.startswith('win'):
+            freeze_support()
+            process.start()
+        else:
+            process.start()
