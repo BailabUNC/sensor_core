@@ -53,7 +53,7 @@ def update_save_data(args_dict: dict, queue):
                     data_shared[i + 1][:-window_length] = data_shared[i + 1][window_length:]
                     data_shared[i + 1][-window_length:] = ys[:, i]
                     save_data = data_shared[i + 1][:]
-                    mm.append_channel(key=channel_key[i], value=save_data)
+                    mm.append_serial_channel(key=channel_key[i], data=save_data)
                 idx = 0
             mm.release_mutex(mutex)
 

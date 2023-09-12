@@ -1,26 +1,11 @@
 from MABOS_core.data.data_manager import *
 from MABOS_core.memory.mem_manager import *
 from MABOS_core.serial.ser_manager import *
+from MABOS_core.utils.utils import *
 import multiprocessing
 from multiprocessing import freeze_support
 import threading
 from warnings import warn
-import os
-
-
-def setup_process_start_method():
-    """ Set up multiprocessing start method based on operating system
-
-    """
-    if sys.platform.startswith('win'):
-        multiprocessing.set_start_method("spawn", force=True)
-        os_flag = 'win'
-    elif sys.platform.startswith('linux') or sys.platform.startswith('cygwin') or sys.platform.startswith('darwin'):
-        multiprocessing.set_start_method("fork", force=True)
-        os_flag = 'unix'
-    else:
-        raise EnvironmentError('Unsupported platform')
-    return os_flag
 
 
 class SensorManager:
@@ -73,8 +58,8 @@ class SensorManager:
         if self.os_flag == 'win':
             if save_data:
                 p = threading.Thread(name='update',
-                                    target=update_save_data,
-                                    args=(self.static_args_dict, self.dynamic_queue,))
+                                     target=update_save_data,
+                                     args=(self.static_args_dict, self.dynamic_queue,))
             else:
                 p = threading.Thread(name='update',
                                      target=update_data,
