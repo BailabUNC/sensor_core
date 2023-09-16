@@ -2,7 +2,7 @@ import multiprocessing
 from typing import *
 from multiprocessing.shared_memory import SharedMemory
 import MABOS_core.plot.plot_manager as pm
-from .strg_manager import _save_channel
+from .strg_manager import create_serial_database
 import numpy as np
 
 
@@ -31,8 +31,8 @@ def release_mutex(mutex):
     mutex.release()
 
 
-def create_shared_block(channel_key: Union[np.ndarray, str], num_points: int = 1000, save_data: bool = True,
-                        grid_plot_flag: bool = True, dtype=np.int64):
+def create_shared_block(channel_key: Union[np.ndarray, str], num_points: int = 1000,
+                        save_data: bool = True, grid_plot_flag: bool = True, dtype=np.int64):
     """ Create Shared Memory Block for global access to streamed data
 
     :param channel_key: list of channel names
@@ -50,7 +50,6 @@ def create_shared_block(channel_key: Union[np.ndarray, str], num_points: int = 1
                              dtype=dtype, buffer=shm.buf)
     data_shared[:] = data[:]
     if save_data:
-        for i in range(len(channel_key)):
-            _save_channel(key=channel_key[i], value=[0])
+        create_serial_database(channel_key=channel_key, num_points=num_points, overwrite=True)
 
     return shm, data_shared, plot

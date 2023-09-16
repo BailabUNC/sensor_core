@@ -5,3 +5,4 @@ pygfx>=0.1.10
 imageio
 sqlitedict
 pyserial
+h5py

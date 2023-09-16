@@ -45,7 +45,7 @@ def initialize_plot_data(num_points: int):
     return xs, ys
 
 
-def initialize_grid_plot_data(num_channel: Union[np.ndarray, str], num_points: int):
+def initialize_grid_plot_data(num_channel: int, num_points: int):
     """ Initialize GridPlot data
 
     :param num_channel: number of distinct channels

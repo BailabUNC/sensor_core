@@ -6,7 +6,7 @@ install_requires = [
     'jupyterlab',
     'pyserial',
     'fastplotlib',
-    'sqlitedict',
+    'h5py',
     ]
 
 setup(
