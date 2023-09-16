@@ -1,103 +1,119 @@
 import numpy as np
 import MABOS_core.memory as mm
-import MABOS_core.serial.ser_manager as sm
+from MABOS_core.serial import SerialManager
+from MABOS_core.utils import DictManager
 
 
-def update_save_data(args_dict: dict, queue):
-    """ Update data in shared memory object, and intermittently save data to .sqlite3 file
+class DataManager(SerialManager, DictManager):
+    def __init__(self, static_args_dict, online: bool = False, dynamic_args_queue=None,
+                 save_data: bool = False, multiproc: bool = False):
+        """ Initialize Data Manager - handles serial port initialization and managerment
+        of data for the online (real-time) use case ONLY
 
-    :param args_dict: dictionary containing kwargs for memory and plot management. Contains the following:
-        channel_key, commport, baudrate, num_points, window_size, mutex, ser, shm.name, plot, shape, dtype
-    :param queue: Queue object used to pass dynamic input parameters like {num_points, window_size}
-    :return: no explicit return. Continuously runs to update memory object with streamed data and save data to file
-    """
-    idx = 0
-    try:
-        ser = args_dict["ser"]
-        shm_name = args_dict["shm_name"]
-        mutex = args_dict["mutex"]
-        shape = args_dict["shape"]
-        dtype = args_dict["dtype"]
-        channel_key = args_dict["channel_key"]
-    except:
-        raise ValueError(f"args_dict {args_dict} should contain the following keys:\n"
-                         f"ser, shm_name, mutex, shape, dtype, channel_key, num_points")
+        Offline data management is accomplished through the usage of the strg_manager and plot_manager
+        """
+        self.online = online
+        self.static_args_dict = static_args_dict
+        self.dynamic_args_queue = dynamic_args_queue
+        self.save_data = save_data
+        self.multiproc = multiproc
 
-    try:
-        dynamic_args_dict = queue.get()
-    except:
-        raise ValueError(f"Queue {queue} is empty upon initialization, please restart process")
+        # Initialize DictManager Subclass
+        DictManager.__init__(self, online=self.online,
+                             multiproc=self.multiproc)
 
-    while True:
-        if queue.empty():
-            pass
+        # Unpack static_args_dict
+        self.update_dictionary(args_dict=self.static_args_dict,
+                               dict_type="static")
+        if self.online:
+            self.unpack_online_static_dict()
         else:
-            dynamic_args_dict = queue.get()
-        window_size = dynamic_args_dict["window_size"]
-        num_points = dynamic_args_dict["num_points"]
-        ys = sm.acquire_data(ser=ser, num_channel=shape[0] - 1, window_size=window_size)
-        if ys is not None:
-            window_length = np.shape(ys)[0]
-            shm = mm.SharedMemory(shm_name)
-            mm.acquire_mutex(mutex)
-            data_shared = np.ndarray(shape=shape, dtype=dtype,
-                                     buffer=shm.buf)
+            self.unpack_offline_static_dict()
 
-            if idx < num_points:
-                for i in range(shape[0] - 1):
-                    data_shared[i + 1][:-window_length] = data_shared[i + 1][window_length:]
-                    data_shared[i + 1][-window_length:] = ys[:, i]
-                idx += 1
+        # Unpack dynamic_args_dict if we need online plotting and it exists
+        if self.online is True and self.dynamic_args_queue is not None:
+            try:
+                self.dynamic_args_dict = self.dynamic_args_queue.get()
+                self.num_points = self.dynamic_args_dict["num_points"]
+                self.window_size = self.dynamic_args_dict["window_size"]
+
+            except:
+                raise ValueError(f"Queue {self.dynamic_args_queue} initialization failed. "
+                                 f"Please restart process")
+            self.update_dictionary(args_dict=self.dynamic_args_dict,
+                                   dict_type="dynamic")
+            self.select_dict_to_unpack()
+
+        # Start serial port
+        if self.online:
+            self.start_serial()
+
+    def start_serial(self):
+        """ Initialize SerialManager subclass, and setup serial port
+
+        """
+        SerialManager.__init__(self, commport=self.commport,
+                               baudrate=self.baudrate,
+                               num_channel=self.num_channel,
+                               window_size=self.window_size,
+                               EOL=self.EOL)
+        self.setup_serial()
+
+    def online_update_data(self):
+        """ Update data in real time
+        multiproc: if flag is True, will use shared memory object to share data between processes
+        save_data: if flag is True, will continuously save data to hdf5 file
+        """
+        accumulated_frames = 0
+
+        while True:
+            if self.dynamic_args_queue.empty():
+                pass
             else:
-                for i in range(shape[0] - 1):
-                    data_shared[i + 1][:-window_length] = data_shared[i + 1][window_length:]
-                    data_shared[i + 1][-window_length:] = ys[:, i]
-                    save_data = data_shared[i + 1][:]
-                    mm.append_serial_channel(key=channel_key[i], data=save_data)
-                idx = 0
-            mm.release_mutex(mutex)
+                self.dynamic_args_dict = self.dynamic_args_queue.get()
+                self.num_points = self.dynamic_args_dict["num_points"]
+                self.window_size = self.dynamic_args_dict["window_size"]
 
+            ys = self.acquire_data()
+            if ys is not None:
+                serial_window_length = np.shape(ys)[0]
+                if self.multiproc:
+                    shm = mm.SharedMemory(self.shm_name)
+                    mm.acquire_mutex(self.mutex)
+                    data_shared = np.ndarray(shape=self.shape, dtype=self.dtype,
+                                             buffer=shm.buf)
+                else:
+                    data_shared = None
+                    pass
+                    # TODO add way to run same class wtihout need for multiprocessing
 
-def update_data(args_dict: dict, queue):
-    """ Update data in shared memory object
+                if self.save_data:
+                    accumulated_frames += serial_window_length
+                    if accumulated_frames < self.num_points:
+                        self._online_update_data(curr_data=data_shared, new_data=ys,
+                                                 serial_window_length=serial_window_length)
+                    else:
+                        data = self._online_update_data(curr_data=data_shared, new_data=ys,
+                                                        serial_window_length=serial_window_length)
+                        for i in range(self.shape[0] - 1):
+                            save_data = data[i + 1][:]
+                            mm.append_serial_channel(key=self.channel_key[i],
+                                                     data=save_data)
+                else:
+                    self._online_update_data(curr_data=data_shared, new_data=ys,
+                                             serial_window_length=serial_window_length)
 
-    :param args_dict: dictionary containing kwargs for memory and plot management. Contains the following:
-        channel_key, commport, baudrate, mutex, ser, shm.name, plot, shape, dtype
-    :param queue: Queue object used to pass dynamic input parameters like {num_points, window_size}
-    :return: no explicit return. Continuously runs to update memory object with streamed data
-    """
+                if self.multiproc:
+                    mm.release_mutex(self.mutex)
 
-    try:
-        ser = args_dict["ser"]
-        shm_name = args_dict["shm_name"]
-        mutex = args_dict["mutex"]
-        shape = args_dict["shape"]
-        dtype = args_dict["dtype"]
-    except:
-        raise ValueError(f"args_dict {args_dict} should contain the following keys:\n"
-                         f"ser, shm_name, mutex, shape, dtype")
+    def _online_update_data(self, curr_data, new_data, serial_window_length):
+        """ Function that handles rolling buffer update for the online_update_data
+        :param curr_data: current/original data to update
+        :param new_data: serial/new data to append
+        :param serial_window_length: number of time points to update (append/pop)
 
-    try:
-        dynamic_args_dict = queue.get()
-    except:
-        raise ValueError(f"Queue {queue} is empty upon initialization, please restart process")
-
-    while True:
-        if queue.empty():
-            pass
-        else:
-            dynamic_args_dict = queue.get()
-        window_size = dynamic_args_dict["window_size"]
-        ys = sm.acquire_data(ser=ser, num_channel=shape[0] - 1, window_size=window_size)
-        if ys is not None:
-            window_length = np.shape(ys)[0]
-            shm = mm.SharedMemory(shm_name)
-            mm.acquire_mutex(mutex)
-            data_shared = np.ndarray(shape=shape, dtype=dtype,
-                                     buffer=shm.buf)
-
-            for i in range(shape[0] - 1):
-                data_shared[i + 1][:-window_length] = data_shared[i + 1][window_length:]
-                data_shared[i + 1][-window_length:] = ys[:, i]
-
-            mm.release_mutex(mutex)
+        """
+        for i in range(self.shape[0] - 1):
+            curr_data[i + 1][:-serial_window_length] = curr_data[i + 1][serial_window_length:]
+            curr_data[i + 1][-serial_window_length:] = new_data[:, i]
+        return curr_data
