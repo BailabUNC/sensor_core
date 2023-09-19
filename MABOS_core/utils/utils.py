@@ -37,6 +37,8 @@ class DictManager(object):
         self.dtype = None
         self.mutex = None
         self.shm_name = None
+        self.num_points = None
+        self.window_size = None
         self.args_dict = args_dict
         self.dict_type = dict_type
         self.online = online
@@ -79,6 +81,7 @@ class DictManager(object):
                 self.baudrate = self.args_dict["baudrate"]
                 self.num_channel = np.shape(self.channel_key)[0]
                 self.EOL = self.args_dict["EOL"]
+                self.num_points = self.args_dict["num_points"]
             except ValueError:
                 raise ValueError(f"static_args dict {self.args_dict}"
                                  f"should contain the following keys: \n"
@@ -91,6 +94,7 @@ class DictManager(object):
                 self.baudrate = self.args_dict["baudrate"]
                 self.num_channel = np.shape(self.channel_key)[0]
                 self.EOL = self.args_dict["EOL"]
+                self.num_points = self.args_dict["num_points"]
             except ValueError:
                 raise ValueError(f"static_args dict {self.args_dict}"
                                  f"should contain the following keys: \n"
@@ -103,6 +107,7 @@ class DictManager(object):
         try:
             self.channel_key = self.args_dict["channel_key"]
             self.num_channel = np.shape(self.channel_key)[0]
+            self.num_points = self.args_dict["num_points"]
         except ValueError:
             raise ValueError(f"static_args dict {self.args_dict}"
                              f"should contain the following key: \n"

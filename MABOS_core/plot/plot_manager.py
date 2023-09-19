@@ -1,105 +1,89 @@
 import MABOS_core.memory.mem_manager as mm
-from ._plot_utils import *
+from .plot_utils import *
 from typing import *
 from multiprocessing.shared_memory import SharedMemory
+from MABOS_core.utils.utils import DictManager
 
 
-def initialize_plot(channel_key: Union[np.ndarray, str], num_points: int, grid_plot_flag: bool):
-    """ Handler for initializing Plot/GridPlot
+class PlotManager(DictManager):
+    def __init__(self, static_args_dict, online: bool = True, multiproc: bool = True):
+        DictManager.__init__(self, online=online,
+                             multiproc=multiproc)
 
-    :param channel_key: user-defined channel name
-    :param num_points: number of 'time' points [num_points = time(s) * Hz]
-    :param grid_plot_flag: boolean, determines usage of Plot or GridPlot
-    :return: Calls function to initialize Plot or GridPlot
-    """
-
-    if grid_plot_flag:
-        grid_plot, data = _initialize_grid_plot(channel_key=channel_key, num_points=num_points)
-        return grid_plot, data
-    else:
-        if len(channel_key) != 1:
-            raise ValueError(f"Channel key {channel_key} must have only one element if using Plot")
+        self.update_dictionary(args_dict=static_args_dict,
+                               dict_type="static")
+        # Unpack static_args_dict
+        self.select_dict_to_unpack()
+        # Set grid_plot_flag
+        if self.num_channel > 1:
+            self.grid_plot_flag = True
+        elif self.num_channel == 1:
+            self.grid_plot_flag = False
         else:
-            plot, data = _initialize_plot(channel_key=channel_key, num_points=num_points)
-            return plot, data
+            raise ValueError(f"Number of Channels {self.num_channel} \n"
+                             f"defined as the number of columns in channel_key {self.channel_key} \n"
+                             f"is an invalid number")
+        self.plot = None
 
+    def initialize_plot(self):
+        """ Handler for initializing Plot/GridPlot
+        :return: Calls function to initialize Plot or GridPlot
+        """
 
-def _initialize_plot(channel_key: Union[np.ndarray, str], num_points: int):
-    """ Initialize Plot object and data
+        if self.grid_plot_flag:
+            self.plot, data = self._initialize_grid_plot()
+        else:
+            self.plot, data = self._initialize_plot()
 
-    :param channel_key: user-defined channel name
-    :param num_points: number of 'time' points [num_points = time(s) * Hz]
-    :return: Plot object and data
-    """
-    plot = create_plot(channel_key=channel_key)
-    xs, ys = initialize_plot_data(num_points=num_points)
-    plot_data = np.dstack([xs, ys])[0]
-    plot.add_line(data=plot_data, name=channel_key[0], cmap='jet')
-    plot.auto_scale(maintain_aspect=False)
-    data = np.vstack((xs, ys))
-    return plot, data
+    def _initialize_plot(self):
+        """ Initialize Plot object and data
+        :return: Plot object and data
+        """
+        plot = create_plot(channel_key=self.channel_key)
+        xs, ys = initialize_plot_data(num_points=self.num_points)
+        plot_data = np.dstack([xs, ys])[0]
+        plot.add_line(data=plot_data, name=self.channel_key[0], cmap='jet')
+        plot.auto_scale(maintain_aspect=False)
+        data = np.vstack((xs, ys))
+        return plot, data
 
+    def _initialize_grid_plot(self):
+        """ Initialize GridPlot object and data
+        :return: GridPlot object and data
+        """
+        grid_plot = create_grid_plot(channel_key=self.channel_key)
+        xs, ys = initialize_grid_plot_data(num_channel=self.num_channel, num_points=self.num_points)
+        for i, subplot in enumerate(grid_plot):
+            plot_data = np.dstack([xs, ys[i]])[0]
+            subplot.add_line(data=plot_data, name=self.channel_key[i], cmap='jet')
+        data = np.vstack((xs, ys))
+        return grid_plot, data
 
-def _initialize_grid_plot(channel_key: Union[np.ndarray, str], num_points: int):
-    """ Initialize GridPlot object and data
+    def online_plot_data(self):
+        """ Update Plot data with shared memory object data
+        :return: no explicit return. Updates Plot data, next render cycle will show updated data
+        """
+        # Acquire Shared Memory Object data
+        mm.acquire_mutex(self.mutex)
+        shm = SharedMemory(self.shm_name)
+        data_shared = np.ndarray(shape=self.shape, dtype=self.dtype,
+                                 buffer=shm.buf)
+        data = np.dstack([data_shared[0], data_shared[1]])[0]
+        self.plot[self.channel_key[0]].data = data
+        self.plot.auto_scale(maintain_aspect=False)
+        mm.release_mutex(self.mutex)
 
-    :param channel_key: user-defined channel name
-    :param num_points: number of 'time' points [num_points = time(s) * Hz]
-    :return: GridPlot object and data
-    """
-    grid_plot = create_grid_plot(channel_key=channel_key)
-    xs, ys = initialize_grid_plot_data(num_channel=len(channel_key), num_points=num_points)
-    for i, subplot in enumerate(grid_plot):
-        plot_data = np.dstack([xs, ys[i]])[0]
-        subplot.add_line(data=plot_data, name=channel_key[i], cmap='jet')
-    data = np.vstack((xs, ys))
-    return grid_plot, data
-
-
-def obtain_plot_data(args_dict: dict):
-    """ Update Plot data with shared memory object data
-
-    :param args_dict: dictionary containing kwargs for memory and plot management
-    :return: no explicit return. Updates Plot data, next render cycle will show updated data
-    """
-    # Unpack dictionary
-    plot = args_dict["plot"]
-    mutex = args_dict["mutex"]
-    shm_name = args_dict["shm_name"]
-    shape = args_dict["shape"]
-    dtype = args_dict["dtype"]
-    channel_key = args_dict["channel_key"]
-    # Acquire Shared Memory Object data
-    mm.acquire_mutex(mutex)
-    shm = SharedMemory(shm_name)
-    data_shared = np.ndarray(shape=shape, dtype=dtype,
-                             buffer=shm.buf)
-    data = np.dstack([data_shared[0], data_shared[1]])[0]
-    plot[channel_key[0]].data = data
-    plot.auto_scale(maintain_aspect=False)
-    mm.release_mutex(mutex)
-
-
-def obtain_grid_plot_data(args_dict: dict):
-    """ Update GridPlot data with shared memory object data
-
-    :param args_dict: dictionary containing kwargs for memory and plot management
-    :return: no explicit return. Updates GridPlot data, next render cycle will show updated data
-    """
-    # Unpack dictionary
-    grid_plot = args_dict["plot"]
-    mutex = args_dict["mutex"]
-    shm_name = args_dict["shm_name"]
-    shape = args_dict["shape"]
-    dtype = args_dict["dtype"]
-    channel_key = args_dict["channel_key"]
-    # Acquire Shared Memory Object data
-    mm.acquire_mutex(mutex)
-    shm = SharedMemory(shm_name)
-    data_shared = np.ndarray(shape=shape, dtype=dtype,
-                             buffer=shm.buf)
-    for i, subplot in enumerate(grid_plot):
-        data = np.dstack([data_shared[0], data_shared[i + 1]])[0]
-        subplot[channel_key[i]].data = data
-        subplot.auto_scale(maintain_aspect=False)
-    mm.release_mutex(mutex)
+    def online_grid_plot_data(self):
+        """ Update GridPlot data with shared memory object data
+        :return: no explicit return. Updates GridPlot data, next render cycle will show updated data
+        """
+        # Acquire Shared Memory Object data
+        mm.acquire_mutex(self.mutex)
+        shm = SharedMemory(self.shm_name)
+        data_shared = np.ndarray(shape=self.shape, dtype=self.dtype,
+                                 buffer=shm.buf)
+        for i, subplot in enumerate(self.plot):
+            data = np.dstack([data_shared[0], data_shared[i + 1]])[0]
+            subplot[self.channel_key[i]].data = data
+            subplot.auto_scale(maintain_aspect=False)
+        mm.release_mutex(self.mutex)

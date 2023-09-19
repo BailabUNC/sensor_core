@@ -1,13 +1,13 @@
-from MABOS_core.data import DataManager
+from MABOS_core.data import OnlineDataManager
+from MABOS_core.plot import PlotManager
 from MABOS_core.memory.mem_manager import *
 from MABOS_core.utils.utils import *
 import multiprocessing
 from multiprocessing import freeze_support
-import threading
 from warnings import warn
 
 
-class SensorManager:
+class SensorManager(OnlineDataManager, PlotManager):
     def __init__(self, channel_key: Union[np.ndarray, str], commport: str, num_points: int = 1000,
                  window_size: int = 1, baudrate: int = 115200):
         """ Initialize SensorManager Class
@@ -19,14 +19,14 @@ class SensorManager:
         :param baudrate: target baudrate
         """
 
-        # Ensures all resources available to parent process are identical to child process. Needed for windows & macOS
+        # Defines start method for multiprocessing. Necessary for windows and macOS
         self.os_flag = setup_process_start_method()
 
         mutex = create_mutex()
         self.window_size = window_size
-        self.shm, data_shared, self.plot = create_shared_block(grid_plot_flag=True,
-                                                               channel_key=channel_key,
-                                                               num_points=num_points)
+        self.shm, data_shared = create_shared_block(grid_plot_flag=True,
+                                                    channel_key=channel_key,
+                                                    num_points=num_points)
 
         self.static_args_dict = {
             "channel_key": channel_key,
@@ -34,10 +34,10 @@ class SensorManager:
             "baudrate": baudrate,
             "mutex": mutex,
             "shm_name": self.shm.name,
-            "plot": self.plot,
             "shape": data_shared.shape,
             "dtype": data_shared.dtype,
-            "EOL": None
+            "EOL": None,
+            "num_points": num_points
         }
 
         self.dynamic_args_dict = {
@@ -46,11 +46,10 @@ class SensorManager:
         }
         self.dynamic_args_queue = self.setup_queue(q_type="dynamic")
 
-        self.dm = DataManager(static_args_dict=self.static_args_dict,
-                              online=True,
-                              dynamic_args_queue=self.dynamic_args_queue,
-                              save_data=True,
-                              multiproc=True)
+        self.odm = OnlineDataManager(static_args_dict=self.static_args_dict,
+                                     dynamic_args_queue=self.dynamic_args_queue,
+                                     save_data=True,
+                                     multiproc=True)
 
     def update_data_process(self, save_data: bool = True):
         """ Initialize dedicated process to update data
@@ -60,9 +59,17 @@ class SensorManager:
         """
 
         p = multiprocessing.Process(name='update',
-                                    target=self.dm.online_update_data)
+                                    target=self.odm.online_update_data)
 
         return p
+
+    def setup_plot(self):
+        PlotManager.__init__(self,
+                             static_args_dict=self.static_args_dict,
+                             online=True,
+                             multiproc=True)
+        self.initialize_plot()
+        return self.plot
 
     def update_params(self, params: dict):
         """ Check validity and update parameters
