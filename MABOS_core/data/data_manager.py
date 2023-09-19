@@ -2,24 +2,22 @@ import numpy as np
 import MABOS_core.memory as mm
 from MABOS_core.serial import SerialManager
 from MABOS_core.utils import DictManager
+from MABOS_core.memory.strg_manager import create_serial_database
 
 
-class DataManager(SerialManager, DictManager):
-    def __init__(self, static_args_dict, online: bool = False, dynamic_args_queue=None,
-                 save_data: bool = False, multiproc: bool = False):
-        """ Initialize Data Manager - handles serial port initialization and managerment
+class OnlineDataManager(SerialManager, DictManager):
+    def __init__(self, static_args_dict, dynamic_args_queue=None,
+                 save_data: bool = False, multiproc: bool = True):
+        """ Initialize Online Data Manager - handles serial port initialization and management
         of data for the online (real-time) use case ONLY
-
-        Offline data management is accomplished through the usage of the strg_manager and plot_manager
         """
-        self.online = online
         self.static_args_dict = static_args_dict
         self.dynamic_args_queue = dynamic_args_queue
         self.save_data = save_data
         self.multiproc = multiproc
 
         # Initialize DictManager Subclass
-        DictManager.__init__(self, online=self.online,
+        DictManager.__init__(self, online=True,
                              multiproc=self.multiproc)
 
         # Unpack static_args_dict
@@ -47,6 +45,10 @@ class DataManager(SerialManager, DictManager):
         # Start serial port
         if self.online:
             self.start_serial()
+
+        # Create serial database
+        if save_data:
+            create_serial_database(channel_key=self.channel_key, num_points=self.num_points, overwrite=True)
 
     def start_serial(self):
         """ Initialize SerialManager subclass, and setup serial port
