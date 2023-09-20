@@ -2,8 +2,8 @@ from MABOS_core.data import OnlineDataManager
 from MABOS_core.plot import PlotManager
 from MABOS_core.memory.mem_manager import *
 from MABOS_core.utils.utils import *
-import multiprocessing
-from multiprocessing import freeze_support
+from multiprocessing import Process, freeze_support
+from threading import Thread
 from warnings import warn
 
 
@@ -57,9 +57,12 @@ class SensorManager(OnlineDataManager, PlotManager):
         :param save_data: boolean flag. If true, save acquired data to file and RAM, if not just update it in RAM
         :return: pointer to process
         """
-
-        p = multiprocessing.Process(name='update',
-                                    target=self.odm.online_update_data)
+        if self.os_flag == 'win':
+            p = Thread(name='update',
+                       target=self.odm.online_update_data)
+        else:
+            p = Process(name='update',
+                        target=self.odm.online_update_data)
 
         return p
 

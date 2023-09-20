@@ -101,6 +101,7 @@ class OnlineDataManager(SerialManager, DictManager):
                             save_data = data[i + 1][:]
                             mm.append_serial_channel(key=self.channel_key[i],
                                                      data=save_data)
+                        accumulated_frames = 0
                 else:
                     self._online_update_data(curr_data=data_shared, new_data=ys,
                                              serial_window_length=serial_window_length)
