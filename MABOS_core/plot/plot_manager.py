@@ -34,6 +34,7 @@ class PlotManager(DictManager):
             self.plot, data = self._initialize_grid_plot()
         else:
             self.plot, data = self._initialize_plot()
+        return self.plot
 
     def _initialize_plot(self):
         """ Initialize Plot object and data

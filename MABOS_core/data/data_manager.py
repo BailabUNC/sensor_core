@@ -69,12 +69,15 @@ class OnlineDataManager(SerialManager, DictManager):
         accumulated_frames = 0
 
         while True:
-            if self.dynamic_args_queue.empty():
-                pass
-            else:
-                self.dynamic_args_dict = self.dynamic_args_queue.get()
-                self.num_points = self.dynamic_args_dict["num_points"]
-                self.window_size = self.dynamic_args_dict["window_size"]
+            try:
+                if self.dynamic_args_queue.empty():
+                    pass
+                else:
+                    self.dynamic_args_dict = self.dynamic_args_queue.get()
+                    self.num_points = self.dynamic_args_dict["num_points"]
+                    self.window_size = self.dynamic_args_dict["window_size"]
+            except:
+                self.window_size = 1
 
             ys = self.acquire_data()
             if ys is not None:
@@ -101,7 +104,6 @@ class OnlineDataManager(SerialManager, DictManager):
                             save_data = data[i + 1][:]
                             mm.append_serial_channel(key=self.channel_key[i],
                                                      data=save_data)
-                        accumulated_frames = 0
                 else:
                     self._online_update_data(curr_data=data_shared, new_data=ys,
                                              serial_window_length=serial_window_length)
