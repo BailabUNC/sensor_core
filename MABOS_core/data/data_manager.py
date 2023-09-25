@@ -2,12 +2,12 @@ import numpy as np
 import MABOS_core.memory as mm
 from MABOS_core.serial import SerialManager
 from MABOS_core.utils import DictManager
-from MABOS_core.memory.strg_manager import create_serial_database
+from MABOS_core.memory.strg_manager import StorageManager
 
 
-class OnlineDataManager(SerialManager, DictManager):
+class OnlineDataManager(SerialManager, DictManager, StorageManager):
     def __init__(self, static_args_dict, dynamic_args_queue=None,
-                 save_data: bool = False, multiproc: bool = True):
+                 save_data: bool = False, multiproc: bool = True, save_type: str = ".sqlite3"):
         """ Initialize Online Data Manager - handles serial port initialization and management
         of data for the online (real-time) use case ONLY
         """
@@ -48,7 +48,9 @@ class OnlineDataManager(SerialManager, DictManager):
 
         # Create serial database
         if save_data:
-            create_serial_database(channel_key=self.channel_key, num_points=self.num_points, overwrite=True)
+            StorageManager.__init__(self, channel_key=self.channel_key,
+                                    filetype=save_type, overwrite=True, )
+            self.create_serial_database()
 
     def start_serial(self):
         """ Initialize SerialManager subclass, and setup serial port
@@ -102,8 +104,10 @@ class OnlineDataManager(SerialManager, DictManager):
                                                         serial_window_length=serial_window_length)
                         for i in range(self.shape[0] - 1):
                             save_data = data[i + 1][:]
-                            mm.append_serial_channel(key=self.channel_key[i],
-                                                     data=save_data)
+                            self.append_serial_channel(key=self.channel_key[i],
+                                                       data=save_data)
+                        accumulated_frames = 0
+
                 else:
                     self._online_update_data(curr_data=data_shared, new_data=ys,
                                              serial_window_length=serial_window_length)

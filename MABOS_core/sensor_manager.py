@@ -9,7 +9,7 @@ from warnings import warn
 
 class SensorManager(OnlineDataManager, PlotManager):
     def __init__(self, channel_key: Union[np.ndarray, str], commport: str, num_points: int = 1000,
-                 window_size: int = 1, baudrate: int = 115200):
+                 window_size: int = 1, baudrate: int = 115200, save_type: str = ".sqlite3"):
         """ Initialize SensorManager Class
         Initializes serial port, shared memory object, and kwarg dictionary (args_dict)
         :param channel_key: list of channel names
@@ -19,6 +19,7 @@ class SensorManager(OnlineDataManager, PlotManager):
         :param baudrate: target baudrate
         """
 
+        self.save_type = save_type
         # Defines start method for multiprocessing. Necessary for windows and macOS
         self.os_flag = setup_process_start_method()
 
@@ -46,23 +47,25 @@ class SensorManager(OnlineDataManager, PlotManager):
         }
         self.dynamic_args_queue = self.setup_queue(q_type="dynamic")
 
-        self.odm = OnlineDataManager(static_args_dict=self.static_args_dict,
-                                     dynamic_args_queue=self.dynamic_args_queue,
-                                     save_data=True,
-                                     multiproc=True)
-
     def update_data_process(self, save_data: bool = True):
         """ Initialize dedicated process to update data
 
         :param save_data: boolean flag. If true, save acquired data to file and RAM, if not just update it in RAM
         :return: pointer to process
         """
+
+        odm = OnlineDataManager(static_args_dict=self.static_args_dict,
+                                dynamic_args_queue=self.dynamic_args_queue,
+                                save_data=save_data,
+                                multiproc=True,
+                                save_type=self.save_type)
+
         if self.os_flag == 'win':
             p = Thread(name='update',
-                       target=self.odm.online_update_data)
+                       target=odm.online_update_data)
         else:
             p = Process(name='update',
-                        target=self.odm.online_update_data)
+                        target=odm.online_update_data)
 
         return p
 

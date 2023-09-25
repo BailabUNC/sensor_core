@@ -2,7 +2,6 @@ import multiprocessing
 from typing import *
 from multiprocessing.shared_memory import SharedMemory
 from MABOS_core.plot.plot_utils import *
-from .strg_manager import create_serial_database
 import numpy as np
 
 
