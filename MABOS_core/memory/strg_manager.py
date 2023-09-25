@@ -1,60 +1,98 @@
 import h5py
+from sqlitedict import SqliteDict
 import numpy as np
 import pathlib
 from typing import *
 
 
-def _create_h5_file(filepath: str, overwrite: bool = False):
-    full_path = pathlib.Path(filepath)
-    if overwrite:
-        f = h5py.File(full_path, 'w')
-    else:
-        if pathlib.Path.is_file(full_path):
-            raise ValueError(f'proposed filepath {full_path} already exists. Set overwrite '
-                             f'kwarg to true if you wish to replace file')
-        else:
-            f = h5py.File(full_path, 'x')
+def create_h5_file(filepath: str):
+    f = h5py.File(filepath, 'w')
     return f
 
 
-def create_serial_database(channel_key: Union[np.ndarray, str], filepath: str = './serial_db.hdf5',
-                           num_points: int = 1000, overwrite: bool = False):
-    f = _create_h5_file(filepath, overwrite)
-    for i in range(len(channel_key)):
-        f.create_dataset(channel_key[i], shape=(1, num_points), chunks=True, maxshape=(1, None))
-    f.close()
+def create_sqlite3_file(filepath: str, key: str):
+    with SqliteDict(filepath) as mydict:
+        mydict[key] = []
+        mydict.commit()
+
+
+def load_sqlite3_file(filepath: str):
+    with SqliteDict(filepath) as mydict:
+        return mydict
 
 
 def load_h5_file(filepath: str):
-    full_path = pathlib.Path(filepath)
-    if pathlib.Path.is_file(full_path):
-        f = h5py.File(filepath, 'a')
-    else:
-        raise ValueError(f"given filepath {filepath} does not exist, or is not a valid file")
+    f = h5py.File(filepath, 'a')
     return f
 
 
-def load_dataset(filepath: str, key: str):
-    f = load_h5_file(filepath)
-    dset = f[key]
-    if dset:
-        return f, dset
-    else:
-        raise ValueError(f'Given key {key} is not in hdf5 file at {filepath}')
+class StorageManager:
+    def __init__(self, channel_key: Union[np.ndarray, str], filepath: str = './serial_db',
+                 overwrite: bool = False, filetype: str = '.hdf5'):
+        self.channel_key = channel_key
+        self.full_filepath = filepath + filetype
+        self.filetype = filetype
+        self.overwrite = overwrite
 
+        if not self.filetype == ".hdf5" and not self.filetype == ".sqlite3":
+            raise ValueError(f"defined filetype {filetype} is unsupported. \n"
+                             f"Must use .hdf5 or .sqlite3")
 
-def load_serial_channel(key: str, filepath: str = './serial_db.hdf5'):
-    f, dset = load_dataset(filepath, key)
-    channel_data = np.zeros((1, dset.shape[1]), dtype=dset.dtype)
-    dset.read_direct(channel_data, np.s_[0, :], np.s_[0, :])
-    f.close()
-    return channel_data[0]
+        if pathlib.Path.is_file(pathlib.Path(self.full_filepath)) and not self.overwrite:
+            raise ValueError(f'proposed filepath {self.full_filepath} already exists. Set overwrite '
+                             f'kwarg to true if you wish to replace file')
 
+    def create_serial_database(self):
+        if self.filetype == ".hdf5":
+            f = create_h5_file(filepath=self.full_filepath)
+            for i, key in enumerate(self.channel_key):
+                f.create_dataset(name=key,
+                                 shape=(1, 1),
+                                 chunks=True,
+                                 maxshape=(1, None))
+            f.close()
+        elif self.filetype == ".sqlite3":
+            for i, key in enumerate(self.channel_key):
+                create_sqlite3_file(filepath=self.full_filepath,
+                                    key=key, )
 
-def append_serial_channel(key: str, data: np.ndarray or dict, filepath: str = './serial_db.hdf5',
-                          num_points: int = 1000):
-    f, dset = load_dataset(filepath, key)
-    dset.resize((dset.shape[1] + data.shape[0]), axis=1)
-    dset.write_direct(source=data, dest_sel=np.s_[0, -num_points:])
-    f.close()
+    def load_serial_database(self):
+        if self.filetype == ".hdf5":
+            db = load_h5_file(filepath=self.full_filepath)
+        elif self.filetype == ".sqlite3":
+            db = load_sqlite3_file(filepath=self.full_filepath)
+        return db
 
+    def load_serial_channel(self, key: str, keep_db_open: bool = False):
+        db = self.load_serial_database()
+        if self.filetype == ".hdf5":
+            try:
+                channel = db[key]
+            except:
+                raise ValueError(f'Given key {key} is not in hdf5 file at {self.full_filepath}')
+
+            channel_data = np.zeros((1, channel.shape[1]), dtype=channel.dtype)
+            channel.read_direct(channel_data, np.s_[0, :], np.s_[0, :])
+
+            if not keep_db_open:
+                db.close()
+
+        elif self.filetype == ".sqlite3":
+            try:
+                with db:
+                    channel = db[key]
+            except:
+                raise ValueError(f'Given key {key} is not in sqlite3 file at {self.full_filepath}')
+        return db, channel
+
+    def append_serial_channel(self, key: str, data: np.ndarray):
+        db, channel = self.load_serial_channel(key=key, keep_db_open=True)
+        if self.filetype == ".hdf5":
+            channel.resize((channel.shape[1] + data.shape[0]), axis=1)
+            channel.write_direct(source=data, dest_sel=np.s_[0, -data.shape[0]:])
+            db.close()
+        elif self.filetype == ".sqlite3":
+            channel = np.append(channel[:], data)
+            with db:
+                db[key] = channel
+                db.commit()
