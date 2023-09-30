@@ -2,6 +2,7 @@ numpy
 jupyterlab
 jupyter_rfb
 pygfx>=0.1.10
+fastplotlib
 imageio
 sqlitedict
 pyserial
