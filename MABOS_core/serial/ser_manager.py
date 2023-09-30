@@ -68,6 +68,9 @@ class SerialManager:
 
         :return: channel data [shape: (self.window_size, self.num_channel)]
         """
+        if self.ser is None:
+            raise ValueError(f"serial port {self.ser} must be instantiated before acquiring data\n"
+                             f"please run setup_serial()")
 
         ser_data = np.zeros((self.window_size, self.num_channel))
         channel_data = np.array([])
