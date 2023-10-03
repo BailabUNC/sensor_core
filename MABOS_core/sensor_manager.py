@@ -5,11 +5,12 @@ from MABOS_core.utils.utils import *
 from multiprocessing import Process, freeze_support
 from threading import Thread
 from warnings import warn
+import pathlib
 
 
 class SensorManager(OnlineDataManager, PlotManager):
     def __init__(self, channel_key: Union[np.ndarray, str], commport: str, num_points: int = 1000,
-                 window_size: int = 1, baudrate: int = 115200, save_type: str = ".sqlite3"):
+                 window_size: int = 1, baudrate: int = 115200):
         """ Initialize SensorManager Class
         Initializes serial port, shared memory object, and kwarg dictionary (args_dict)
         :param channel_key: list of channel names
@@ -18,9 +19,7 @@ class SensorManager(OnlineDataManager, PlotManager):
         :param window_size: for 1D data, number of time points to acquire before passing
         :param baudrate: target baudrate
         """
-
-        self.save_type = save_type
-        # Defines start method for multiprocessing. Necessary for windows and macOS
+# Defines start method for multiprocessing. Necessary for windows and macOS
         self.os_flag = setup_process_start_method()
 
         mutex = create_mutex()
@@ -47,18 +46,24 @@ class SensorManager(OnlineDataManager, PlotManager):
         }
         self.dynamic_args_queue = self.setup_queue(q_type="dynamic")
 
-    def update_data_process(self, save_data: bool = True):
+    def update_data_process(self, save_data: bool = False, filepath: str = None):
         """ Initialize dedicated process to update data
 
         :param save_data: boolean flag. If true, save acquired data to file and RAM, if not just update it in RAM
+        :param filepath: string denoting target filepath to create database
         :return: pointer to process
         """
+        if save_data and filepath is not None:
+            filetype = pathlib.Path(filepath).suffix
+            if filetype != ".hdf5" and filetype != ".sqlite3":
+                raise ValueError(f"filepath {filepath} is an invalid filetype {filetype}\n"
+                                 f"filepaths should create .hdf5 or .sqlite3 files only")
 
         odm = OnlineDataManager(static_args_dict=self.static_args_dict,
                                 dynamic_args_queue=self.dynamic_args_queue,
                                 save_data=save_data,
                                 multiproc=True,
-                                save_type=self.save_type)
+                                filepath=filepath)
 
         if self.os_flag == 'win':
             p = Thread(name='update',
