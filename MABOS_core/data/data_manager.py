@@ -7,7 +7,7 @@ from MABOS_core.memory.strg_manager import StorageManager
 
 class OnlineDataManager(SerialManager, DictManager, StorageManager):
     def __init__(self, static_args_dict, dynamic_args_queue=None,
-                 save_data: bool = False, multiproc: bool = True, save_type: str = ".sqlite3"):
+                 save_data: bool = False, multiproc: bool = True, filepath: str = None):
         """ Initialize Online Data Manager - handles serial port initialization and management
         of data for the online (real-time) use case ONLY
         """
@@ -49,7 +49,7 @@ class OnlineDataManager(SerialManager, DictManager, StorageManager):
         # Create serial database
         if save_data:
             StorageManager.__init__(self, channel_key=self.channel_key,
-                                    filetype=save_type, overwrite=True, )
+                                    filepath=filepath, overwrite=True)
             self.create_serial_database()
 
     def start_serial(self):
