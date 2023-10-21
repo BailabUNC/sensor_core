@@ -1,8 +1,8 @@
 import numpy as np
-import MABOS_core.memory as mm
-from MABOS_core.serial import SerialManager
-from MABOS_core.utils import DictManager
-from MABOS_core.memory.strg_manager import StorageManager
+import sensor_core.memory as mm
+from sensor_core.serial import SerialManager
+from sensor_core.utils import DictManager
+from sensor_core.memory.strg_manager import StorageManager
 
 
 class OnlineDataManager(SerialManager, DictManager, StorageManager):

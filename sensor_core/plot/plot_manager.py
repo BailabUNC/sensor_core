@@ -1,8 +1,8 @@
-import MABOS_core.memory.mem_manager as mm
+import sensor_core.memory.mem_manager as mm
 from .plot_utils import *
 from typing import *
 from multiprocessing.shared_memory import SharedMemory
-from MABOS_core.utils.utils import DictManager
+from sensor_core.utils.utils import DictManager
 
 
 class PlotManager(DictManager):

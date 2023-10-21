@@ -1,7 +1,7 @@
 import multiprocessing
 from typing import *
 from multiprocessing.shared_memory import SharedMemory
-from MABOS_core.plot.plot_utils import *
+from sensor_core.plot.plot_utils import *
 import numpy as np
 
 
