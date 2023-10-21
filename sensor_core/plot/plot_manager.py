@@ -1,4 +1,4 @@
-import sensor_core.memory.mem_manager as mm
+import sensor_core.memory.mem_utils as mm
 from .plot_utils import *
 from typing import *
 from multiprocessing.shared_memory import SharedMemory
