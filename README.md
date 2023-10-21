@@ -1,8 +1,8 @@
-# MABOS_core
+# sensor_core
 Repository containing core API used for plotting sensor data in realtime
 *Please see [fastplotlib](https://github.com/kushalkolar/fastplotlib/tree/master), developed by Kushal Kolar, to learn more about the plotting library we primarily use.*
 
-## Installation Instructions  
+## Developer Installation Instructions  
 *select/cd into directory you want to install pygfx*  
 ```
 git clone https://github.com/pygfx/pygfx  
@@ -10,7 +10,7 @@ cd pygfx/
 pip install -e .
 ````
 
-*select/cd into directory you want to install MABOS_core*  
+*select/cd into directory you want to install sensor_core*  
 ```
 git clone https://github.com/BailabUNC/MABOS_core  
 cd MABOS_core/  

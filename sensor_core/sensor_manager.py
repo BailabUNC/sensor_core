@@ -1,7 +1,7 @@
-from MABOS_core.data import OnlineDataManager
-from MABOS_core.plot import PlotManager
-from MABOS_core.memory.mem_manager import *
-from MABOS_core.utils.utils import *
+from sensor_core.data import OnlineDataManager
+from sensor_core.plot import PlotManager
+from sensor_core.memory.mem_manager import *
+from sensor_core.utils.utils import *
 from multiprocessing import Process, freeze_support
 from threading import Thread
 from warnings import warn
