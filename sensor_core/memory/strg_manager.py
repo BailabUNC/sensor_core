@@ -96,12 +96,11 @@ class StorageManager:
 
     @classmethod
     def load_serial_channel(cls, key: str, filepath: str = './serial_db.sqlite3',
-                            filetype: str = None, keep_db_open: bool = False):
+                            filetype: str = None):
         """ Class method to load serial channel from serial database
         :param key: string defining target key to unpack
         :param filepath: string defining filepath to target database
         :param filetype: string defining target filetype. If None, extracted from filepath
-        :param keep_db_open: boolean, determines whether to close the database or keep it open (hdf5)
         return: db (database) and channel (channel_data for target key)
         """
         db = cls.load_serial_database(filepath=filepath, filetype=filetype)
@@ -118,8 +117,7 @@ class StorageManager:
             channel_data = np.zeros((1, channel.shape[1]), dtype=channel.dtype)
             channel.read_direct(channel_data, np.s_[0, :], np.s_[0, :])
 
-            if not keep_db_open:
-                db.close()
+            db.close()
 
         elif filetype == ".sqlite3":
             try:
@@ -127,7 +125,7 @@ class StorageManager:
                     channel = db[key]
             except:
                 raise ValueError(f'Given key {key} is not in sqlite3 file at {filepath}')
-        return db, channel
+        return channel
 
     def append_serial_channel(self, key: str, data: np.ndarray):
         """ function to append input data to existing channel in serial database
