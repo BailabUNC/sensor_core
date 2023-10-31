@@ -10,7 +10,7 @@ import pathlib
 
 class SensorManager(OnlineDataManager, PlotManager):
     def __init__(self, channel_key: Union[np.ndarray, str], commport: str, num_points: int = 1000,
-                 window_size: int = 1, baudrate: int = 115200):
+                 window_size: int = 1, baudrate: int = 115200, dtype=np.int64):
         """ Initialize SensorManager Class
         Initializes serial port, shared memory object, and kwarg dictionary (args_dict)
         :param channel_key: list of channel names
@@ -18,6 +18,7 @@ class SensorManager(OnlineDataManager, PlotManager):
         :param num_points: number of 'time' points [num_points = time(s) * Hz]
         :param window_size: for 1D data, number of time points to acquire before passing
         :param baudrate: target baudrate
+        :param dtype: data type to store in shared memory object
         """
 # Defines start method for multiprocessing. Necessary for windows and macOS
         self.os_flag = setup_process_start_method()
@@ -26,7 +27,8 @@ class SensorManager(OnlineDataManager, PlotManager):
         self.window_size = window_size
         self.shm, data_shared = create_shared_block(grid_plot_flag=True,
                                                     channel_key=channel_key,
-                                                    num_points=num_points)
+                                                    num_points=num_points,
+                                                    dtype=dtype)
 
         self.static_args_dict = {
             "channel_key": channel_key,
