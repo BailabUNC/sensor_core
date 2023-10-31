@@ -48,11 +48,12 @@ class SensorManager(OnlineDataManager, PlotManager):
         }
         self.dynamic_args_queue = self.setup_queue(q_type="dynamic")
 
-    def update_data_process(self, save_data: bool = False, filepath: str = None):
+    def update_data_process(self, save_data: bool = False, filepath: str = None, func=None):
         """ Initialize dedicated process to update data
 
         :param save_data: boolean flag. If true, save acquired data to file and RAM, if not just update it in RAM
         :param filepath: string denoting target filepath to create database
+        :param func: optional custom function to handle serial data acquisition
         :return: pointer to process
         """
         if save_data and filepath is not None:
@@ -69,10 +70,12 @@ class SensorManager(OnlineDataManager, PlotManager):
 
         if self.os_flag == 'win':
             p = Thread(name='update',
-                       target=odm.online_update_data)
+                       target=odm.online_update_data,
+                       args=(func,))
         else:
             p = Process(name='update',
-                        target=odm.online_update_data)
+                        target=odm.online_update_data,
+                        args=(func,))
 
         return p
 

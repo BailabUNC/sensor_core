@@ -63,10 +63,11 @@ class OnlineDataManager(SerialManager, DictManager, StorageManager):
                                EOL=self.EOL)
         self.setup_serial()
 
-    def online_update_data(self):
+    def online_update_data(self, func=None):
         """ Update data in real time
         multiproc: if flag is True, will use shared memory object to share data between processes
         save_data: if flag is True, will continuously save data to hdf5 file
+        :param func: optional custom function for serial data acquisition handler
         """
         accumulated_frames = 0
 
@@ -81,7 +82,7 @@ class OnlineDataManager(SerialManager, DictManager, StorageManager):
             except:
                 self.window_size = 1
 
-            ys = self.acquire_data()
+            ys = self.acquire_data(func=func)
             if ys is not None:
                 serial_window_length = np.shape(ys)[0]
                 if self.multiproc:

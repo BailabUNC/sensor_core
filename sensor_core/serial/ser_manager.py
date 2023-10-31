@@ -62,16 +62,7 @@ class SerialManager:
         except (OSError, serial.SerialException):
             raise OSError("Error setting up serial port")
 
-    def acquire_data(self):
-        """ Acquire serial port data
-        Confirms validity of incoming data
-
-        :return: channel data [shape: (self.window_size, self.num_channel)]
-        """
-        if self.ser is None:
-            raise ValueError(f"serial port {self.ser} must be instantiated before acquiring data\n"
-                             f"please run setup_serial()")
-
+    def _acquire_data(self):
         ser_data = np.zeros((self.window_size, self.num_channel))
         channel_data = np.array([])
         # Decode incoming data into ser_data array
@@ -90,6 +81,26 @@ class SerialManager:
                 pass
             else:
                 channel_data = np.append(channel_data, ser_data[i][:])
+        return channel_data
+
+    def acquire_data(self, func=None):
+        """ Acquire serial port data
+        Confirms validity of incoming data
+
+        :return: channel data [shape: (self.window_size, self.num_channel)]
+        """
+        if self.ser is None:
+            raise ValueError(f"serial port {self.ser} must be instantiated before acquiring data\n"
+                             f"please run setup_serial()")
+        if func is None:
+            channel_data = self._acquire_data()
+        else:
+            try:
+                channel_data = func(ser=self.ser, window_size=self.window_size, num_channel=self.num_channel)
+            except:
+                raise ValueError(f'custom function {func} must have the following variables as parameters:\n'
+                                 f'ser, window_size, num_channel')
+
         channel_data = np.reshape(channel_data, (int(len(channel_data) / self.num_channel), self.num_channel))
         if channel_data.size > 0:
             return channel_data
