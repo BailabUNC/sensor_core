@@ -1,6 +1,7 @@
 import numpy as np
 from typing import *
 from fastplotlib import Plot, GridPlot
+from sensor_core.memory.strg_manager import StorageManager
 
 
 def create_plot(channel_key: Union[np.ndarray, str]):
@@ -26,6 +27,7 @@ def create_grid_plot(channel_key: Union[np.ndarray, str]):
     """
     grid_shape = (len(channel_key), 1)
     names = np.transpose([channel_key]).tolist()
+    print(names)
 
     grid_plot = GridPlot(
         shape=grid_shape,
@@ -55,3 +57,51 @@ def initialize_grid_plot_data(num_channel: int, num_points: int):
     xs = [np.linspace(0, num_points - 1, num_points)]
     ys = np.ones((num_channel, num_points)) * np.linspace(0, 1, num_points)
     return xs, ys
+
+def offline_initialize_data(filepath: str, channel_key: Union[np.ndarray, str]):
+    """ Extract offline sensor data for set of keys
+    :param filepath: define path to database to read data from
+    :param channel_key: define set of keys in database to plot data
+    :return: x and y values
+    """
+    ys = []
+    for key in channel_key:
+        data = StorageManager.load_serial_channel(key=key, filepath=filepath)
+        ys.append(data)
+
+    num_points = len(ys[0])
+    xs = [np.linspace(0, num_points-1, num_points)]
+    return xs, ys
+
+def offline_plot_data(filepath: str, channel_key: Union[np.ndarray, str] = None):
+    """ Initialize plot for offline data
+    :param filepath: define path to database to read data from
+    :param channel_key: define set of keys in databaes to plot data
+    :return: return plot object 
+    """
+    if channel_key is None:
+        database = StorageManager.load_serial_database(filepath=filepath)
+        channel_key=[]
+        with database as db:
+            for key in db.keys():
+                channel_key.append(key)
+        channel_keys = list(np.transpose(channel_key))
+    else:
+        channel_keys=channel_key
+
+    print(channel_keys)
+    print(type(channel_keys))
+
+    xs, ys = offline_initialize_data(filepath, channel_key=channel_keys)
+    plot = create_grid_plot(channel_key=channel_keys)
+
+    for i, subplot in enumerate(plot):
+        data = np.dstack([xs, ys[i]])[0]
+        subplot.add_line(data=data, name=channel_keys[i], cmap='jet')
+        subplot.auto_scale(maintain_aspect=False)
+
+    plot.show()
+
+    return plot
+
+

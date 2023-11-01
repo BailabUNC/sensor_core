@@ -23,24 +23,19 @@ class OnlineDataManager(SerialManager, DictManager, StorageManager):
         # Unpack static_args_dict
         self.update_dictionary(args_dict=self.static_args_dict,
                                dict_type="static")
-        if self.online:
-            self.unpack_online_static_dict()
-        else:
-            self.unpack_offline_static_dict()
+
+        self.unpack_selected_dict()
 
         # Unpack dynamic_args_dict if we need online plotting and it exists
         if self.online is True and self.dynamic_args_queue is not None:
             try:
                 self.dynamic_args_dict = self.dynamic_args_queue.get()
-                self.num_points = self.dynamic_args_dict["num_points"]
-                self.window_size = self.dynamic_args_dict["window_size"]
-
             except:
                 raise ValueError(f"Queue {self.dynamic_args_queue} initialization failed. "
                                  f"Please restart process")
             self.update_dictionary(args_dict=self.dynamic_args_dict,
                                    dict_type="dynamic")
-            self.select_dict_to_unpack()
+            self.unpack_selected_dict()
 
         # Start serial port
         if self.online:

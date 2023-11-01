@@ -52,7 +52,7 @@ class DictManager(object):
         self.args_dict = args_dict
         self.dict_type = dict_type
 
-    def select_dict_to_unpack(self):
+    def unpack_selected_dict(self):
         """ Selects which dictionary to unpack based upon input arguments
         Key Arguments: online (real-time) flag and dict_type (static or dynamic)
 

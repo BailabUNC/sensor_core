@@ -13,7 +13,7 @@ class PlotManager(DictManager):
         self.update_dictionary(args_dict=static_args_dict,
                                dict_type="static")
         # Unpack static_args_dict
-        self.select_dict_to_unpack()
+        self.unpack_selected_dict()
         # Set grid_plot_flag
         if self.num_channel > 1:
             self.grid_plot_flag = True
