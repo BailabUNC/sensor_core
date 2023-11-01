@@ -63,6 +63,12 @@ class SerialManager:
             raise OSError("Error setting up serial port")
 
     def _acquire_data(self):
+        """Handler function to acquire serial port data
+        Confirms validity of incoming data
+
+        :return: channel data [shape: (self.window_size, self.num_channel)]
+
+        """
         ser_data = np.zeros((self.window_size, self.num_channel))
         channel_data = np.array([])
         # Decode incoming data into ser_data array
@@ -85,7 +91,7 @@ class SerialManager:
 
     def acquire_data(self, func=None):
         """ Acquire serial port data
-        Confirms validity of incoming data
+        :param func: if None, defaults to using _acquire_data func. otherwise, use custom func to process ser data
 
         :return: channel data [shape: (self.window_size, self.num_channel)]
         """
