@@ -89,9 +89,6 @@ def offline_plot_data(filepath: str, channel_key: Union[np.ndarray, str] = None)
     else:
         channel_keys=channel_key
 
-    print(channel_keys)
-    print(type(channel_keys))
-
     xs, ys = offline_initialize_data(filepath, channel_key=channel_keys)
     plot = create_grid_plot(channel_key=channel_keys)
 
