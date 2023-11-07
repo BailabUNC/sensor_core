@@ -6,7 +6,7 @@ from sensor_core.utils.utils import DictManager
 
 
 class PlotManager(DictManager):
-    def __init__(self, static_args_dict, online: bool = True, multiproc: bool = True):
+    def __init__(self, static_args_dict, online: bool = True, multiproc: bool = True, dsp_plot: bool = True):
         DictManager.__init__(self, online=online,
                              multiproc=multiproc)
 
@@ -15,7 +15,7 @@ class PlotManager(DictManager):
         # Unpack static_args_dict
         self.unpack_selected_dict()
         # Set grid_plot_flag
-        if self.num_channel > 1:
+        if self.num_channel > 1 or dsp_plot:
             self.grid_plot_flag = True
         elif self.num_channel == 1:
             self.grid_plot_flag = False
@@ -24,6 +24,7 @@ class PlotManager(DictManager):
                              f"defined as the number of columns in channel_key {self.channel_key} \n"
                              f"is an invalid number")
         self.plot = None
+        self.dsp_plot = dsp_plot
 
     def initialize_plot(self):
         """ Handler for initializing Plot/GridPlot
@@ -52,11 +53,17 @@ class PlotManager(DictManager):
         """ Initialize GridPlot object and data
         :return: GridPlot object and data
         """
-        grid_plot = create_grid_plot(channel_key=self.channel_key)
+        if self.dsp_plot:
+            channel_key = [self.channel_key, []]
+            for name in channel_key[0]:
+                channel_key[1].append(f"{name}-filt")
+        else:
+            channel_key = [self.channel_key]
+        grid_plot = create_grid_plot(channel_key=channel_key)
         xs, ys = initialize_grid_plot_data(num_channel=self.num_channel, num_points=self.num_points)
         for i, subplot in enumerate(grid_plot):
-            plot_data = np.dstack([xs, ys[i]])[0]
-            subplot.add_line(data=plot_data, name=self.channel_key[i], cmap='jet')
+            plot_data = np.dstack([xs, ys[i % self.num_channel]])[0]
+            subplot.add_line(data=plot_data, name=channel_key[i // self.num_channel][i % self.num_channel], cmap='jet')
         data = np.vstack((xs, ys))
         return grid_plot, data
 
@@ -74,17 +81,39 @@ class PlotManager(DictManager):
         self.plot.auto_scale(maintain_aspect=False)
         mm.release_mutex(self.mutex)
 
-    def online_grid_plot_data(self):
+    def _online_grid_plot_data(self):
         """ Update GridPlot data with shared memory object data
         :return: no explicit return. Updates GridPlot data, next render cycle will show updated data
         """
         # Acquire Shared Memory Object data
+        if self.dsp_plot:
+            channel_key = [self.channel_key, []]
+            for name in channel_key[0]:
+                channel_key[1].append(f"{name}-filt")
+        else:
+            channel_key = [self.channel_key]
         mm.acquire_mutex(self.mutex)
         shm = SharedMemory(self.shm_name)
         data_shared = np.ndarray(shape=self.shape, dtype=self.dtype,
                                  buffer=shm.buf)
         for i, subplot in enumerate(self.plot):
-            data = np.dstack([data_shared[0], data_shared[i + 1]])[0]
-            subplot[self.channel_key[i]].data = data
+            if i // self.num_channel > 0:
+                item = i % self.num_channel
+                data_arr = np.concatenate(([np.percentile(data_shared[item+1], 50)] * 100, data_shared[item + 1]))
+                cumsum = np.cumsum(data_arr)
+                ys = (cumsum[100:] - cumsum[:-100]) / float(100)
+            else:
+                ys = data_shared[i+1]
+            data = np.dstack([data_shared[0], ys])[0]
+            subplot[channel_key[i // self.num_channel][i % self.num_channel]].data = data
             subplot.auto_scale(maintain_aspect=False)
         mm.release_mutex(self.mutex)
+
+    def online_grid_plot_data(self, func=None):
+        if func is None:
+            self._online_grid_plot_data()
+        else:
+            func(channel_key=self.channel_key,
+                 mutex=self.mutex,
+                 shm_name=self.shm_name,
+                 )

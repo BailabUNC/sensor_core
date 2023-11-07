@@ -25,9 +25,8 @@ def create_grid_plot(channel_key: Union[np.ndarray, str]):
     :param channel_key: names of subplots
     :return: GridPlot object
     """
-    grid_shape = (len(channel_key), 1)
-    names = np.transpose([channel_key]).tolist()
-    print(names)
+    grid_shape = (np.shape(channel_key)[0], np.shape(channel_key)[1])
+    names = channel_key
 
     grid_plot = GridPlot(
         shape=grid_shape,
