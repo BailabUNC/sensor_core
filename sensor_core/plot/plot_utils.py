@@ -19,17 +19,17 @@ def create_plot(channel_key: Union[np.ndarray, str]):
     return plot
 
 
-def create_grid_plot(channel_key: Union[np.ndarray, str]):
+def create_grid_plot(plot_channel_key: Union[np.ndarray, str]):
     """ Create fastplotlib GridPlot (collection of subplots)
 
-    :param channel_key: names of subplots
+    :param plot_channel_key: names of subplots
     :return: GridPlot object
     """
-    grid_shape = (np.shape(channel_key)[0], np.shape(channel_key)[1])
+    grid_shape = np.shape(plot_channel_key)
 
     grid_plot = GridPlot(
         shape=grid_shape,
-        names=channel_key
+        names=plot_channel_key
     )
     return grid_plot
 
@@ -56,6 +56,7 @@ def initialize_grid_plot_data(num_channel: int, num_points: int):
     ys = np.ones((num_channel, num_points)) * np.linspace(0, 1, num_points)
     return xs, ys
 
+
 def offline_initialize_data(filepath: str, channel_key: Union[np.ndarray, str]):
     """ Extract offline sensor data for set of keys
     :param filepath: define path to database to read data from
@@ -68,8 +69,9 @@ def offline_initialize_data(filepath: str, channel_key: Union[np.ndarray, str]):
         ys.append(data)
 
     num_points = len(ys[0])
-    xs = [np.linspace(0, num_points-1, num_points)]
+    xs = [np.linspace(0, num_points - 1, num_points)]
     return xs, ys
+
 
 def offline_plot_data(filepath: str, channel_key: Union[np.ndarray, str] = None):
     """ Initialize plot for offline data
@@ -79,13 +81,13 @@ def offline_plot_data(filepath: str, channel_key: Union[np.ndarray, str] = None)
     """
     if channel_key is None:
         database = StorageManager.load_serial_database(filepath=filepath)
-        channel_key=[]
+        channel_key = []
         with database as db:
             for key in db.keys():
                 channel_key.append(key)
         channel_keys = list(np.transpose(channel_key))
     else:
-        channel_keys=channel_key
+        channel_keys = channel_key
 
     xs, ys = offline_initialize_data(filepath, channel_key=channel_keys)
     plot = create_grid_plot(channel_key=channel_keys)
@@ -98,5 +100,3 @@ def offline_plot_data(filepath: str, channel_key: Union[np.ndarray, str] = None)
     plot.show()
 
     return plot
-
-

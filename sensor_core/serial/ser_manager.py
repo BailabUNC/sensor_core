@@ -35,7 +35,8 @@ def find_serial():
 
 
 class SerialManager:
-    def __init__(self, commport: str, baudrate: int, num_channel: int = 1, window_size: int = 1, EOL: str = None):
+    def __init__(self, commport: str, baudrate: int, num_channel: int = 1,
+                 window_size: int = 1, EOL: str = None):
         """ Initialize SerialManager class - manages functions related to instantiating and using serial port
 
         :param commport: target serial port

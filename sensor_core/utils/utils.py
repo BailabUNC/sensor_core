@@ -30,19 +30,22 @@ class DictManager(object):
         self.dict_type = dict_type
 
     @staticmethod
-    def create_static_dict(channel_key: Union[np.ndarray, str], commport: str, baudrate: int,
-                           **kwargs):
+    def create_static_dict(ser_channel_key: Union[np.ndarray, str], plot_channel_key: Union[np.ndarray, str],
+                           commport: str, baudrate: int, **kwargs):
         """ Create dictionary for static parameters
-        :param channel_key: array containing names for channels to be acquired/plotted
+        :param ser_channel_key: array containing names for channels to be acquired from serial port
+        :param plot_channel_key: array containing names for grid plot in the correct shape
         :param commport: string representing port to read data from
         :param baudrate: rate of data transfer in bits/sec
         :return: static_args_dict, dictionary containing all static parameters
         """
-        valid_keys = ['channel_key', 'commport', 'baudrate', 'mutex',
+        valid_keys = ['ser_channel_key', 'plot_channel_key',
+                      'commport', 'baudrate', 'mutex',
                       'shm_name', 'shape', 'dtype', 'EOL',
                       'num_points', 'num_channel']
         static_args_dict = {
-            "channel_key": channel_key,
+            "ser_channel_key": ser_channel_key,
+            "plot_channel_key": plot_channel_key,
             "commport": commport,
             "baudrate": baudrate
         }
@@ -82,7 +85,8 @@ class DictManager(object):
         :param kwargs: all parameters you wish to update
         :return: static_args_dict. Dictionary containing all static parameters
         """
-        valid_keys = ['channel_key', 'commport', 'baudrate', 'mutex',
+        valid_keys = ['ser_channel_key', 'plot_channel_key,'
+                                         'commport', 'baudrate', 'mutex',
                       'shm_name', 'shape', 'dtype', 'EOL',
                       'num_points', 'num_channel']
         for key in kwargs:
@@ -110,7 +114,6 @@ class DictManager(object):
                         f"omitted from dictionary.")
         return dynamic_args_dict
 
-
     def select_dictionary(self, args_dict: dict, dict_type: str):
         """ Function to update class attribute values for args dict and type
         :param args_dict: argument dictionary. Can be static or dynamic parameter dictionary
@@ -132,8 +135,8 @@ class DictManager(object):
         """ Unpack static parameter dictionary for online/real-time use
         :return: adds attributes to self for each key in dict
         """
-        essential_keys = ['channel_key', 'commport', 'baudrate', 'mutex',
-                          'shm_name', 'shape', 'dtype']
+        essential_keys = ['ser_channel_key', "plot_channel_key",'commport', 'baudrate',
+                          'mutex', 'shm_name', 'shape', 'dtype']
         optional_keys = ['EOL', 'num_points', 'num_channel']
 
         for key in essential_keys:

@@ -9,11 +9,12 @@ import pathlib
 
 
 class SensorManager(DataManager, PlotManager):
-    def __init__(self, channel_key: Union[np.ndarray, str], commport: str, baudrate: int = 115200,
-                 num_points: int = 1000, window_size: int = 1, dtype=np.float64):
+    def __init__(self, ser_channel_key: Union[np.ndarray, str], commport: str,
+                 baudrate: int = 115200, num_points: int = 1000, window_size: int = 1,
+                 dtype=np.float64, **kwargs):
         """ Initialize SensorManager Class
         Initializes serial port, shared memory object, and kwarg dictionary (args_dict)
-        :param channel_key: list of channel names
+        :param serial_channel_key: list of serial channel names
         :param commport: target serial port
         :param baudrate: target data transfer rate (in bits/sec)
         :param num_points: number of 'time' points [num_points = time(s) * Hz]
@@ -22,14 +23,19 @@ class SensorManager(DataManager, PlotManager):
         """
         # Defines start method for multiprocessing. Necessary for windows and macOS
         self.os_flag = setup_process_start_method()
-
+        # Create mutex to manage access to shared memory object
         mutex = create_mutex()
-        self.shm, data_shared = create_shared_block(grid_plot_flag=True,
-                                                    channel_key=channel_key,
+        # Setup serial and plot channels
+        self.ser_channel_key, self.plot_channel_key = self.setup_channel_keys(
+                                                         ser_channel_key=ser_channel_key,
+                                                         **kwargs)
+
+        self.shm, data_shared = create_shared_block(ser_channel_key=ser_channel_key,
                                                     num_points=num_points,
                                                     dtype=dtype)
 
-        self.static_args_dict = self.create_static_dict(channel_key=channel_key,
+        self.static_args_dict = self.create_static_dict(ser_channel_key=self.ser_channel_key,
+                                                        plot_channel_key=self.plot_channel_key,
                                                         commport=commport,
                                                         baudrate=baudrate,
                                                         mutex=mutex,
@@ -42,6 +48,27 @@ class SensorManager(DataManager, PlotManager):
                                                           window_size=window_size)
 
         self.dynamic_args_queue = self.setup_queue()
+
+    @staticmethod
+    def setup_channel_keys(ser_channel_key, **kwargs):
+        """ Set up serial and plot channel keys
+        :param ser_channel_key: serial channel key (list of names for serial channels)
+        :param kwargs: can contain plot_channel_key kwarg, which we can use to set plot settings
+        :return: ser_channel_key and plot_channel_key, lists of keys for serial and plot functions
+        """
+        if len(np.shape(ser_channel_key)) > 1:
+            raise ValueError(f"serial channel key {ser_channel_key} \n"
+                             f"must be a one-dimensional list")
+        if "plot_channel_key" in kwargs:
+            plot_channel_key = kwargs["plot_channel_key"]
+        else:
+            plot_channel_key = [ser_channel_key]
+
+        for key in plot_channel_key:
+            if key not in ser_channel_key:
+                raise KeyError(f'plot_channel_key must include only keys within serial_channel_key')
+
+        return ser_channel_key, plot_channel_key
 
     def update_data_process(self, save_data: bool = False, filepath: str = None, func=None):
         """ Initialize dedicated process to update data

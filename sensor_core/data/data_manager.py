@@ -45,7 +45,7 @@ class DataManager(SerialManager, DictManager, StorageManager):
 
         # Create serial database
         if save_data:
-            StorageManager.__init__(self, channel_key=self.channel_key,
+            StorageManager.__init__(self, channel_key=self.ser_channel_key,
                                     filepath=filepath, overwrite=overwrite_data)
             self.create_serial_database()
 
@@ -99,7 +99,7 @@ class DataManager(SerialManager, DictManager, StorageManager):
                                                         serial_window_length=serial_window_length)
                         for i in range(self.shape[0] - 1):
                             save_data = data[i + 1][:]
-                            self.append_serial_channel(key=self.channel_key[0][i],
+                            self.append_serial_channel(key=self.ser_channel_key[i],
                                                        data=save_data)
                         accumulated_frames = 0
 
