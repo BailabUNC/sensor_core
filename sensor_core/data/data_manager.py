@@ -5,46 +5,48 @@ from sensor_core.utils import DictManager
 from sensor_core.memory.strg_manager import StorageManager
 
 
-class OnlineDataManager(SerialManager, DictManager, StorageManager):
-    def __init__(self, static_args_dict, dynamic_args_queue=None,
-                 save_data: bool = False, multiproc: bool = True, filepath: str = None):
+class DataManager(SerialManager, DictManager, StorageManager):
+    def __init__(self, static_args_dict: dict, dynamic_args_queue,
+                 save_data: bool = False, filepath: str = None, overwrite_data: bool = True):
         """ Initialize Online Data Manager - handles serial port initialization and management
-        of data for the online (real-time) use case ONLY
+        of data for the online (real-time) use case ONL
+        :param static_args_dict: dictionary containing key parameters for initialization
+        :param dynamic_args_queue: queue used to send dictionary with dynamic parameters
+        :param save_data: boolean, determines whether to save data
+        :param filepath: filepath to save data to
+        :param overwrite_data: boolean, decides whether to overwrite existing saved data
         """
         self.static_args_dict = static_args_dict
         self.dynamic_args_queue = dynamic_args_queue
         self.save_data = save_data
-        self.multiproc = multiproc
 
         # Initialize DictManager Subclass
-        DictManager.__init__(self, online=True,
-                             multiproc=self.multiproc)
+        DictManager.__init__(self)
 
         # Unpack static_args_dict
-        self.update_dictionary(args_dict=self.static_args_dict,
+        self.select_dictionary(args_dict=self.static_args_dict,
                                dict_type="static")
 
         self.unpack_selected_dict()
 
-        # Unpack dynamic_args_dict if we need online plotting and it exists
-        if self.online is True and self.dynamic_args_queue is not None:
-            try:
-                self.dynamic_args_dict = self.dynamic_args_queue.get()
-            except:
-                raise ValueError(f"Queue {self.dynamic_args_queue} initialization failed. "
-                                 f"Please restart process")
-            self.update_dictionary(args_dict=self.dynamic_args_dict,
-                                   dict_type="dynamic")
-            self.unpack_selected_dict()
+        # Unpack dynamic_args_dict if it exists
+        try:
+            self.dynamic_args_dict = self.dynamic_args_queue.get()
+        except:
+            raise ValueError(f"Queue {self.dynamic_args_queue} initialization failed. "
+                             f"Please restart process")
+
+        self.select_dictionary(args_dict=self.dynamic_args_dict,
+                               dict_type="dynamic")
+        self.unpack_selected_dict()
 
         # Start serial port
-        if self.online:
-            self.start_serial()
+        self.start_serial()
 
         # Create serial database
         if save_data:
             StorageManager.__init__(self, channel_key=self.channel_key,
-                                    filepath=filepath, overwrite=True)
+                                    filepath=filepath, overwrite=overwrite_data)
             self.create_serial_database()
 
     def start_serial(self):
@@ -60,8 +62,7 @@ class OnlineDataManager(SerialManager, DictManager, StorageManager):
 
     def online_update_data(self, func=None):
         """ Update data in real time
-        multiproc: if flag is True, will use shared memory object to share data between processes
-        save_data: if flag is True, will continuously save data to hdf5 file
+        :save_data: if flag is True, will continuously save data to hdf5 or sqlite3 file
         :param func: optional custom function for serial data acquisition handler
         """
         accumulated_frames = 0
@@ -72,23 +73,21 @@ class OnlineDataManager(SerialManager, DictManager, StorageManager):
                     pass
                 else:
                     self.dynamic_args_dict = self.dynamic_args_queue.get()
-                    self.num_points = self.dynamic_args_dict["num_points"]
-                    self.window_size = self.dynamic_args_dict["window_size"]
+                    self.select_dictionary(args_dict=self.dynamic_args_dict,
+                                           dict_type="dynamic")
+                    self.unpack_selected_dict()
             except:
                 self.window_size = 1
 
             ys = self.acquire_data(func=func)
             if ys is not None:
                 serial_window_length = np.shape(ys)[0]
-                if self.multiproc:
-                    shm = mm.SharedMemory(self.shm_name)
-                    mm.acquire_mutex(self.mutex)
-                    data_shared = np.ndarray(shape=self.shape, dtype=self.dtype,
-                                             buffer=shm.buf)
-                else:
-                    data_shared = None
-                    pass
-                    # TODO add way to run same class wtihout need for multiprocessing
+                shm = mm.SharedMemory(self.shm_name)
+                # Acquire mutex
+                mm.acquire_mutex(self.mutex)
+                # Load shared memory object
+                data_shared = np.ndarray(shape=self.shape, dtype=self.dtype,
+                                         buffer=shm.buf)
 
                 if self.save_data:
                     accumulated_frames += serial_window_length
@@ -107,9 +106,8 @@ class OnlineDataManager(SerialManager, DictManager, StorageManager):
                 else:
                     self._online_update_data(curr_data=data_shared, new_data=ys,
                                              serial_window_length=serial_window_length)
-
-                if self.multiproc:
-                    mm.release_mutex(self.mutex)
+                # Release mutex
+                mm.release_mutex(self.mutex)
 
     def _online_update_data(self, curr_data, new_data, serial_window_length):
         """ Function that handles rolling buffer update for the online_update_data

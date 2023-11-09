@@ -6,23 +6,15 @@ from sensor_core.utils.utils import DictManager
 
 
 class PlotManager(DictManager):
-    def __init__(self, static_args_dict, online: bool = True, multiproc: bool = True):
-        DictManager.__init__(self, online=online,
-                             multiproc=multiproc)
+    def __init__(self, static_args_dict):
+        DictManager.__init__(self)
 
-        self.update_dictionary(args_dict=static_args_dict,
+        self.select_dictionary(args_dict=static_args_dict,
                                dict_type="static")
         # Unpack static_args_dict
         self.unpack_selected_dict()
         # Set grid_plot_flag
-        if self.num_channel > 1:
-            self.grid_plot_flag = True
-        elif self.num_channel == 1:
-            self.grid_plot_flag = False
-        else:
-            raise ValueError(f"Number of Channels {self.num_channel} \n"
-                             f"defined as the number of columns in channel_key {self.channel_key} \n"
-                             f"is an invalid number")
+        self.grid_plot_flag = True
         self.plot = None
 
     def initialize_plot(self):

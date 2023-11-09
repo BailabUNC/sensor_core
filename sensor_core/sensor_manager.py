@@ -1,4 +1,4 @@
-from sensor_core.data import OnlineDataManager
+from sensor_core.data import DataManager
 from sensor_core.plot import PlotManager
 from sensor_core.memory.mem_utils import *
 from sensor_core.utils.utils import *
@@ -8,45 +8,41 @@ from warnings import warn
 import pathlib
 
 
-class SensorManager(OnlineDataManager, PlotManager):
-    def __init__(self, channel_key: Union[np.ndarray, str], commport: str, num_points: int = 1000,
-                 window_size: int = 1, baudrate: int = 115200, dtype=np.int64):
+class SensorManager(DataManager, PlotManager):
+    def __init__(self, channel_key: Union[np.ndarray, str], commport: str, baudrate: int = 115200,
+                 num_points: int = 1000, window_size: int = 1, dtype=np.float64):
         """ Initialize SensorManager Class
         Initializes serial port, shared memory object, and kwarg dictionary (args_dict)
         :param channel_key: list of channel names
         :param commport: target serial port
+        :param baudrate: target data transfer rate (in bits/sec)
         :param num_points: number of 'time' points [num_points = time(s) * Hz]
         :param window_size: for 1D data, number of time points to acquire before passing
-        :param baudrate: target baudrate
         :param dtype: data type to store in shared memory object
         """
-# Defines start method for multiprocessing. Necessary for windows and macOS
+        super().__init__()
+        # Defines start method for multiprocessing. Necessary for windows and macOS
         self.os_flag = setup_process_start_method()
 
         mutex = create_mutex()
-        self.window_size = window_size
         self.shm, data_shared = create_shared_block(grid_plot_flag=True,
                                                     channel_key=channel_key,
                                                     num_points=num_points,
                                                     dtype=dtype)
 
-        self.static_args_dict = {
-            "channel_key": channel_key,
-            "commport": commport,
-            "baudrate": baudrate,
-            "mutex": mutex,
-            "shm_name": self.shm.name,
-            "shape": data_shared.shape,
-            "dtype": data_shared.dtype,
-            "EOL": None,
-            "num_points": num_points
-        }
+        self.static_args_dict = self.create_static_dict(channel_key=channel_key,
+                                                        commport=commport,
+                                                        baudrate=baudrate,
+                                                        mutex=mutex,
+                                                        shm_name=self.shm.name,
+                                                        shape=data_shared.shape,
+                                                        dtype=dtype,
+                                                        num_points=num_points)
 
-        self.dynamic_args_dict = {
-            "num_points": num_points,
-            "window_size": self.window_size
-        }
-        self.dynamic_args_queue = self.setup_queue(q_type="dynamic")
+        self.dynamic_args_dict = self.create_dynamic_dict(num_points=num_points,
+                                                          window_size=window_size)
+
+        self.dynamic_args_queue = self.setup_queue()
 
     def update_data_process(self, save_data: bool = False, filepath: str = None, func=None):
         """ Initialize dedicated process to update data
@@ -56,17 +52,16 @@ class SensorManager(OnlineDataManager, PlotManager):
         :param func: optional custom function to handle serial data acquisition
         :return: pointer to process
         """
-        if save_data and filepath is not None:
+        if save_data and (filepath is not None):
             filetype = pathlib.Path(filepath).suffix
             if filetype != ".hdf5" and filetype != ".sqlite3":
                 raise ValueError(f"filepath {filepath} is an invalid filetype {filetype}\n"
                                  f"filepaths should create .hdf5 or .sqlite3 files only")
 
-        odm = OnlineDataManager(static_args_dict=self.static_args_dict,
-                                dynamic_args_queue=self.dynamic_args_queue,
-                                save_data=save_data,
-                                multiproc=True,
-                                filepath=filepath)
+        odm = DataManager(static_args_dict=self.static_args_dict,
+                          dynamic_args_queue=self.dynamic_args_queue,
+                          save_data=save_data,
+                          filepath=filepath)
 
         if self.os_flag == 'win':
             p = Thread(name='update',
@@ -81,41 +76,26 @@ class SensorManager(OnlineDataManager, PlotManager):
 
     def setup_plot(self):
         PlotManager.__init__(self,
-                             static_args_dict=self.static_args_dict,
-                             online=True,
-                             multiproc=True)
+                             static_args_dict=self.static_args_dict)
         self.initialize_plot()
         return self.plot
 
-    def update_params(self, params: dict):
+    def update_params(self, **kwargs):
         """ Check validity and update parameters
 
-        :param params: dictionary of parameters to update. By default, set to dynamic args dict.
+        :param kwargs: series of parameters to update
         :return: updates queue with new dictionary
         """
-        master_keys = self.dynamic_args_dict.keys()
-        for param_key in params.keys():
-            if param_key in master_keys:
-                self.dynamic_args_dict[f"{param_key}"] = params[f"{param_key}"]
-                self.update_queue(self.dynamic_args_queue)
-            else:
-                warn(f"Parameter key {param_key} does not exist in dynamic parameter dictionary\n"
-                     f"{self.dynamic_args_dict}")
+        self.dynamic_args_dict = self.update_dynamic_dict(dynamic_args_dict=self.dynamic_args_dict,
+                                                          **kwargs)
+        self.update_queue(self.dynamic_args_queue)
 
-    def setup_queue(self, q_type: str = "dynamic"):
+    def setup_queue(self):
         """ Setup queue to hold dynamic parameter dictionaries
-
-        :param q_type: string, determines if queue contains static or dynamic dictionary
         :return: queue object
         """
         q = multiprocessing.Queue()
-
-        if q_type == "static":
-            q.put(self.static_args_dict)
-        elif q_type == "dynamic":
-            q.put(self.dynamic_args_dict)
-        else:
-            warn(f"Unable to setup queue; type argument {q_type} must be 'static' or 'dynamic'")
+        q.put(self.dynamic_args_dict)
         return q
 
     def update_queue(self, q):

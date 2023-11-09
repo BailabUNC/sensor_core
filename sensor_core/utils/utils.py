@@ -32,6 +32,12 @@ class DictManager(object):
     @staticmethod
     def create_static_dict(channel_key: Union[np.ndarray, str], commport: str, baudrate: int,
                            **kwargs):
+        """ Create dictionary for static parameters
+        :param channel_key: array containing names for channels to be acquired/plotted
+        :param commport: string representing port to read data from
+        :param baudrate: rate of data transfer in bits/sec
+        :return: static_args_dict, dictionary containing all static parameters
+        """
         valid_keys = ['channel_key', 'commport', 'baudrate', 'mutex',
                       'shm_name', 'shape', 'dtype', 'EOL',
                       'num_points', 'num_channel']
@@ -49,7 +55,33 @@ class DictManager(object):
         return static_args_dict
 
     @staticmethod
+    def create_dynamic_dict(num_points: int, window_size: int, **kwargs):
+        """ Create dictionary for dynamic parameters
+        :param num_points: number of points to plot in a given subplot (timeseries data)
+        :param window_size: number of points to acquire in each update cycle
+        :return: dynamic_args_dict. dictionary containing all dynamic parameters
+        """
+        valid_keys = ['num_points', 'window_size']
+        dynamic_args_dict = {
+            "num_points": num_points,
+            "window_size": window_size
+        }
+
+        for key in kwargs:
+            if key in valid_keys:
+                dynamic_args_dict[f"{key}"] = kwargs[f"{key}"]
+            else:
+                Warning(f"Key {key} is not an acceptable input in static_args_dict.\n"
+                        f"omitted from dictionary.")
+        return dynamic_args_dict
+
+    @staticmethod
     def update_static_dict(static_args_dict: dict, **kwargs):
+        """ Update existing static args dict
+        :param static_args_dict: dictionary to update params
+        :param kwargs: all parameters you wish to update
+        :return: static_args_dict. Dictionary containing all static parameters
+        """
         valid_keys = ['channel_key', 'commport', 'baudrate', 'mutex',
                       'shm_name', 'shape', 'dtype', 'EOL',
                       'num_points', 'num_channel']
@@ -60,6 +92,24 @@ class DictManager(object):
                 Warning(f"Key {key} is not an acceptable input in static_args_dict.\n"
                         f"omitted from dictionary.")
         return static_args_dict
+
+    @staticmethod
+    def update_dynamic_dict(dynamic_args_dict: dict, **kwargs):
+        """ Update existing dynamic args dict
+        :param dynamic_args_dict: dictionary to update params
+        :param kwargs: all parameters you wish to update
+        :return: dynamic_args_dict. Dictionary containing all static parameters
+        """
+        valid_keys = ['num_points', 'window_size']
+
+        for key in kwargs:
+            if key in valid_keys:
+                dynamic_args_dict[f"{key}"] = kwargs[f"{key}"]
+            else:
+                Warning(f"Key {key} is not an acceptable input in static_args_dict.\n"
+                        f"omitted from dictionary.")
+        return dynamic_args_dict
+
 
     def select_dictionary(self, args_dict: dict, dict_type: str):
         """ Function to update class attribute values for args dict and type
@@ -98,7 +148,11 @@ class DictManager(object):
             try:
                 setattr(self, f"{key}", self.args_dict[f"{key}"])
             except KeyError:
-                setattr(self, f"{key}", None)
+                if key == "num_channel":
+                    num_channel = np.shape(self.args_dict["channel_key"])[1]
+                    setattr(self, f"{key}", num_channel)
+                else:
+                    setattr(self, f"{key}", None)
 
     def unpack_dynamic_dict(self):
         """ Unpack dynamic parameter dictionary (only for online use)
