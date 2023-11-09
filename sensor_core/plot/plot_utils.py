@@ -4,17 +4,14 @@ from fastplotlib import Plot, GridPlot
 from sensor_core.memory.strg_manager import StorageManager
 
 
-def create_plot(channel_key: Union[np.ndarray, str]):
+def create_plot(plot_channel_key: Union[np.ndarray, str]):
     """ Create fastplotlib Plot
 
-    :param channel_key: name of plot (should only have one element)
+    :param plot_channel_key: name of plot (should only have one element)
     :return: Plot object
     """
-    if len(channel_key) > 1:
-        raise ValueError(f"Channel Key {channel_key} should only have one name")
-
     plot = Plot(
-        name=channel_key[0]
+        name=plot_channel_key[0][0]
     )
     return plot
 

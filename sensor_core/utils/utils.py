@@ -152,7 +152,8 @@ class DictManager(object):
                 setattr(self, f"{key}", self.args_dict[f"{key}"])
             except KeyError:
                 if key == "num_channel":
-                    num_channel = np.shape(self.args_dict["channel_key"])[1]
+                    num_channel = np.shape(self.args_dict["plot_channel_key"])[0] * \
+                                  np.shape(self.args_dict["plot_channel_key"])[1]
                     setattr(self, f"{key}", num_channel)
                 else:
                     setattr(self, f"{key}", None)

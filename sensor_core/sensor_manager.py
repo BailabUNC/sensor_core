@@ -64,7 +64,9 @@ class SensorManager(DataManager, PlotManager):
         else:
             plot_channel_key = [ser_channel_key]
 
-        for key in plot_channel_key:
+        plot_shape = np.shape(plot_channel_key)
+
+        for key in np.reshape(plot_channel_key, newshape=(1, plot_shape[0]*plot_shape[1]))[0]:
             if key not in ser_channel_key:
                 raise KeyError(f'plot_channel_key must include only keys within serial_channel_key')
 

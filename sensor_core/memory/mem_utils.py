@@ -39,13 +39,13 @@ def create_shared_block(ser_channel_key: Union[np.ndarray, str],
     :param dtype: data type, default 64-bit integer
     :return: shm (shared memory object), data_shared (initial data), plot (Plot/GridPlot object)
     """
-    if np.shape(ser_channel_key)[1] > 1:
+    if np.shape(ser_channel_key)[0] > 1:
         xs, ys = initialize_grid_plot_data(num_channel=len(ser_channel_key),
                                            num_points=num_points)
         data = np.vstack((xs, ys))
     else:
         xs, ys = initialize_plot_data(num_points=num_points)
-        data = np.dstack([xs, ys])[0]
+        data = np.vstack([xs, ys])
 
     shm = SharedMemory(create=True, size=data.nbytes)
     data_shared = np.ndarray(shape=data.shape,
@@ -54,4 +54,4 @@ def create_shared_block(ser_channel_key: Union[np.ndarray, str],
 
     del data, xs, ys
 
-    return shm
+    return shm, data_shared
