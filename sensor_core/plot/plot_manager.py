@@ -47,8 +47,9 @@ class PlotManager(DictManager):
         grid_plot = create_grid_plot(channel_key=self.channel_key)
         xs, ys = initialize_grid_plot_data(num_channel=self.num_channel, num_points=self.num_points)
         for i, subplot in enumerate(grid_plot):
+            idx = divmod(i, 3)
             plot_data = np.dstack([xs, ys[i]])[0]
-            subplot.add_line(data=plot_data, name=self.channel_key[i], cmap='jet')
+            subplot.add_line(data=plot_data, name=self.channel_key[idx[0]][idx[1]], cmap='jet')
         data = np.vstack((xs, ys))
         return grid_plot, data
 
@@ -76,7 +77,8 @@ class PlotManager(DictManager):
         data_shared = np.ndarray(shape=self.shape, dtype=self.dtype,
                                  buffer=shm.buf)
         for i, subplot in enumerate(self.plot):
+            idx = divmod(i, 3)
             data = np.dstack([data_shared[0], data_shared[i + 1]])[0]
-            subplot[self.channel_key[i]].data = data
+            subplot[self.channel_key[idx[0]][idx[1]]].data = data
             subplot.auto_scale(maintain_aspect=False)
         mm.release_mutex(self.mutex)

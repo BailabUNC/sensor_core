@@ -41,15 +41,15 @@ def create_shared_block(channel_key: Union[np.ndarray, str], num_points: int = 1
     :return: shm (shared memory object), data_shared (initial data), plot (Plot/GridPlot object)
     """
     if grid_plot_flag:
-        if len(channel_key) > 1:
-            xs, ys = initialize_grid_plot_data(num_channel=len(channel_key),
+        if np.shape(channel_key)[1] > 1:
+            xs, ys = initialize_grid_plot_data(num_channel=np.shape(channel_key)[1],
                                                num_points=num_points)
             data = np.vstack((xs, ys))
         else:
             raise ValueError(f"the length of channel key {channel_key} must be greater than one\n"
                              f"if grid_plot_flag {grid_plot_flag} is True")
     else:
-        if len(channel_key) == 1:
+        if np.shape(channel_key)[1] == 1:
             xs, ys = initialize_plot_data(num_points=num_points)
             data = np.dstack([xs, ys])[0]
         else:

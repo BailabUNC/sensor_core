@@ -99,7 +99,7 @@ class DataManager(SerialManager, DictManager, StorageManager):
                                                         serial_window_length=serial_window_length)
                         for i in range(self.shape[0] - 1):
                             save_data = data[i + 1][:]
-                            self.append_serial_channel(key=self.channel_key[i],
+                            self.append_serial_channel(key=self.channel_key[0][i],
                                                        data=save_data)
                         accumulated_frames = 0
 

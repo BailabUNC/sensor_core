@@ -20,7 +20,6 @@ class SensorManager(DataManager, PlotManager):
         :param window_size: for 1D data, number of time points to acquire before passing
         :param dtype: data type to store in shared memory object
         """
-        super().__init__()
         # Defines start method for multiprocessing. Necessary for windows and macOS
         self.os_flag = setup_process_start_method()
 
