@@ -106,6 +106,7 @@ class DataManager(SerialManager, DictManager, StorageManager):
                 else:
                     self._online_update_data(curr_data=data_shared, new_data=ys,
                                              serial_window_length=serial_window_length)
+
                 # Release mutex
                 mm.release_mutex(self.mutex)
 
