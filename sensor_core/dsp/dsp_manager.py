@@ -18,8 +18,7 @@ def moving_avg_filter(data, N, pad):
 def butter_filter(data, min_frq, max_frq, N, btype):
     if((btype == 'lowpass') or (btype == 'highpass') or (btype == 'bandpass') or (btype == 'bandstop')):
         b, a = signal.butter(N, [min_frq, max_frq], btype = btype, analog = False, output = 'ba', fs = 100)
+        filtered = signal.filtfilt(b, a, data)
+        return filtered
     else:
         raise ValueError("Specify btype 'lowpass', 'highpass', 'bandpass', or 'bandstop'")
-    
-    filtered = signal.filtfilt(b, a, data)
-    return filtered
