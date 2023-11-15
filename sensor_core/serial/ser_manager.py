@@ -1,3 +1,5 @@
+import warnings
+
 import serial
 import sys
 import glob
@@ -63,6 +65,20 @@ class SerialManager:
         except (OSError, serial.SerialException):
             raise OSError("Error setting up serial port")
 
+    def check_ser_data(self, ser_data: np.ndarray):
+        """ Function to check quality of acquired serial data
+        :param ser_data: acquired serial data to be checked for correct dimension
+        """
+        ser_data_shape = np.shape(ser_data)
+        if self.window_size != ser_data_shape[0]:
+            warnings.warn(f"number of rows in serial data should be {self.window_size}\n"
+                          f"acquired serial data has {ser_data_shape[0]}")
+
+        if self.num_channel != ser_data_shape[1]:
+            raise ValueError(f"acquired serial data must have the {self.num_channel} channels of data\n"
+                             f"Each channel must be a column in serial function output. \n"
+                             f"current serial function output is {ser_data}")
+
     def _acquire_data(self):
         """Handler function to acquire serial port data
         Confirms validity of incoming data
@@ -88,6 +104,9 @@ class SerialManager:
                 pass
             else:
                 channel_data = np.append(channel_data, ser_data[i][:])
+
+        channel_data = np.reshape(channel_data, (int(len(channel_data) / self.num_channel), self.num_channel))
+
         return channel_data
 
     def acquire_data(self, func=None):
@@ -103,12 +122,12 @@ class SerialManager:
             channel_data = self._acquire_data()
         else:
             try:
-                channel_data = func(ser=self.ser, window_size=self.window_size, num_channel=self.num_channel)
+                channel_data = func(ser=self.ser)
             except:
-                raise ValueError(f'custom function {func} must have the following variables as parameters:\n'
-                                 f'ser, window_size, num_channel')
+                raise ValueError(f'custom function {func} must have the the serial port object referenced as ser')
 
-        channel_data = np.reshape(channel_data, (int(len(channel_data) / self.num_channel), self.num_channel))
+        self.check_ser_data(ser_data=channel_data)
+
         if channel_data.size > 0:
             return channel_data
         else:

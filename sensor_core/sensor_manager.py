@@ -66,6 +66,10 @@ class SensorManager(DataManager, PlotManager):
 
         plot_shape = np.shape(plot_channel_key)
 
+        if len(plot_shape) != 2:
+            raise ValueError(f"plot channel key: {plot_channel_key}\n"
+                             f"should be 2-dimensional even if plotting row/column vector")
+
         for key in np.reshape(plot_channel_key, newshape=(1, plot_shape[0]*plot_shape[1]))[0]:
             if key not in ser_channel_key:
                 raise KeyError(f'plot_channel_key must include only keys within serial_channel_key')
