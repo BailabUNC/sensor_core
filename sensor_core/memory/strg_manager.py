@@ -75,6 +75,8 @@ class StorageManager:
             for i, key in enumerate(self.channel_key):
                 create_sqlite3_file(filepath=self.filepath,
                                     key=key)
+            create_sqlite3_file(filepath=self.filepath,
+                                key="datetime")
 
     @staticmethod
     def load_serial_database(filepath: str = './serial_db.sqlite3', filetype: str = None):
