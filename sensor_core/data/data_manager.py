@@ -6,12 +6,14 @@ from sensor_core.memory.strg_manager import StorageManager
 
 
 class DataManager(SerialManager, DictManager, StorageManager):
-    def __init__(self, static_args_dict: dict, dynamic_args_queue,
+    def __init__(self, static_args_dict: dict, dynamic_args_queue, virtual_ser_port: bool = False,
                  save_data: bool = False, filepath: str = None, overwrite_data: bool = True):
         """ Initialize Online Data Manager - handles serial port initialization and management
         of data for the online (real-time) use case ONL
         :param static_args_dict: dictionary containing key parameters for initialization
         :param dynamic_args_queue: queue used to send dictionary with dynamic parameters
+        :param virtual_ser_port: boolean, if True will not initialize serial port, instead will rely on user-defined
+        custom function to generate simulated data
         :param save_data: boolean, determines whether to save data
         :param filepath: filepath to save data to
         :param overwrite_data: boolean, decides whether to overwrite existing saved data
@@ -41,7 +43,7 @@ class DataManager(SerialManager, DictManager, StorageManager):
         self.unpack_selected_dict()
 
         # Start serial port
-        self.start_serial()
+        self.start_serial(virtual_ser_port=virtual_ser_port)
 
         # Create serial database
         if save_data:
@@ -49,7 +51,7 @@ class DataManager(SerialManager, DictManager, StorageManager):
                                     filepath=filepath, overwrite=overwrite_data)
             self.create_serial_database()
 
-    def start_serial(self):
+    def start_serial(self, virtual_ser_port):
         """ Initialize SerialManager subclass, and setup serial port
 
         """
@@ -57,7 +59,8 @@ class DataManager(SerialManager, DictManager, StorageManager):
                                baudrate=self.baudrate,
                                num_channel=self.num_channel,
                                window_size=self.window_size,
-                               EOL=self.EOL)
+                               EOL=self.EOL,
+                               virtual_ser_port=virtual_ser_port)
         self.setup_serial()
 
     def online_update_data(self, func=None):

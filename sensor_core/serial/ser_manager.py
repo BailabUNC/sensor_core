@@ -36,7 +36,7 @@ def find_serial():
 
 class SerialManager:
     def __init__(self, commport: str, baudrate: int, num_channel: int = 1,
-                 window_size: int = 1, EOL: str = None):
+                 window_size: int = 1, EOL: str = None, virtual_ser_port: bool = None):
         """ Initialize SerialManager class - manages functions related to instantiating and using serial port
 
         :param commport: target serial port
@@ -44,6 +44,8 @@ class SerialManager:
         :param num_channel: number of distinct channels
         :param window_size: for 1D & 2D data, number of timepoints to acquire before passing
         :param EOL: optional; end of line phrase used to separate timepoints
+        :param virtual_ser_port: boolean, if True will not initialize serial port, instead will rely on user-defined
+        custom function to generate simulated data
         """
         self.commport = commport
         self.baudrate = baudrate
@@ -51,17 +53,21 @@ class SerialManager:
         self.window_size = window_size
         self.EOL = EOL
         self.ser = None
+        self.virtual_ser_port = virtual_ser_port
 
     def setup_serial(self):
         """ Sets up given serial port for a given baudrate
 
         :return: serial object
         """
-        try:
-            self.ser = serial.Serial(self.commport, self.baudrate, timeout=0.1)
-            return self.ser
-        except (OSError, serial.SerialException):
-            raise OSError("Error setting up serial port")
+        if self.virtual_ser_port:
+            pass
+        else:
+            try:
+                self.ser = serial.Serial(self.commport, self.baudrate, timeout=0.1)
+                return self.ser
+            except (OSError, serial.SerialException):
+                raise OSError("Error setting up serial port")
 
     def _acquire_data(self):
         """Handler function to acquire serial port data
@@ -96,9 +102,6 @@ class SerialManager:
 
         :return: channel data [shape: (self.window_size, self.num_channel)]
         """
-        if self.ser is None:
-            raise ValueError(f"serial port {self.ser} must be instantiated before acquiring data\n"
-                             f"please run setup_serial()")
         if func is None:
             channel_data = self._acquire_data()
         else:
