@@ -72,11 +72,14 @@ class SensorManager(DataManager, PlotManager):
 
         return ser_channel_key, plot_channel_key
 
-    def update_data_process(self, save_data: bool = False, filepath: str = None, func=None):
+    def update_data_process(self, save_data: bool = False, filepath: str = None,
+                            virtual_ser_port: bool = False, func=None):
         """ Initialize dedicated process to update data
 
         :param save_data: boolean flag. If true, save acquired data to file and RAM, if not just update it in RAM
         :param filepath: string denoting target filepath to create database
+        :param virtual_ser_port: boolean, if true data manager will not instantiate serial port. Will rely on
+        user-defined custom function to generate simulated data
         :param func: optional custom function to handle serial data acquisition
         :return: pointer to process
         """
@@ -89,7 +92,8 @@ class SensorManager(DataManager, PlotManager):
         odm = DataManager(static_args_dict=self.static_args_dict,
                           dynamic_args_queue=self.dynamic_args_queue,
                           save_data=save_data,
-                          filepath=filepath)
+                          filepath=filepath,
+                          virtual_ser_port=virtual_ser_port)
 
         if self.os_flag == 'win':
             p = Thread(name='update',
