@@ -65,16 +65,18 @@ class StorageManager:
         """
         if self.filetype == ".hdf5":
             f = create_h5_file(filepath=self.filepath)
-            for i, key in enumerate(self.channel_key[0]):
+            for i, key in enumerate(self.channel_key):
                 f.create_dataset(name=key,
                                  shape=(1, 1),
                                  chunks=True,
                                  maxshape=(1, None))
             f.close()
         elif self.filetype == ".sqlite3":
-            for i, key in enumerate(self.channel_key[0]):
+            for i, key in enumerate(self.channel_key):
                 create_sqlite3_file(filepath=self.filepath,
                                     key=key)
+            create_sqlite3_file(filepath=self.filepath,
+                                key="datetime")
 
     @staticmethod
     def load_serial_database(filepath: str = './serial_db.sqlite3', filetype: str = None):
