@@ -5,26 +5,29 @@ import numpy as np
 import scipy.signal as signal
 
 class DSPManager(DictManager):
-    def __init__(self, channel_key, commport: str, baudrate: int, window_size: int = 1):
+    def __init__(self, dsp_module):
 
-        self.channel_key = channel_key
-        self.commport = commport
-        self.baudrate = baudrate
-        self.window_size = window_size
-        self.update_dictionary(args_dict=static_args_dict,
+        self.dsp_module = dsp_module
+
+        if (dsp_module != 'moving_avg' or dsp_module != 'butterworth'):
+            raise ValueError('Must enter valid dsp_module')
+
+        self.update_dictionary(args_dict=dsp_dict,
             dict_type="static")
-        
-        static_args_dict = {
-            "channel_key": channel_key,
-            "commport": commport,
-            "baudrate": baudrate
-        }
 
-    def select_dsp_mod(dsp_module, data, N):
+        dsp_dict = {
+            "moving_avg": {"data"},
+            "butterworth": { "order": 4, "N": 100000000}
+        }
+    
+    #some function(dsp_list, **kwargs)
+    #for module in dsp_list:
+        #check for key in kwargs for subset of input
+
+    def select_dsp_mod(dsp_module, data, N, pad):
         if (dsp_module == 'moving_avg'):
-            pad = str(input("Enter 'min' or 'percentile' to pad array with"))
             return DSPManager.moving_avg_filter(data, N, pad)
-        
+ 
         elif (dsp_module == 'butterworth'):
             min_frq = int(input("Enter min frequency cutoff"))
             max_frq = int(input("Enter max frequency cutoff"))
