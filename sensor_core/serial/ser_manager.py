@@ -35,7 +35,8 @@ def find_serial():
 
 
 class SerialManager:
-    def __init__(self, commport: str, baudrate: int, num_channel: int = 1, window_size: int = 1, EOL: str = None):
+    def __init__(self, commport: str, baudrate: int, num_channel: int = 1,
+                 window_size: int = 1, EOL: str = None, virtual_ser_port: bool = False):
         """ Initialize SerialManager class - manages functions related to instantiating and using serial port
 
         :param commport: target serial port
@@ -43,6 +44,8 @@ class SerialManager:
         :param num_channel: number of distinct channels
         :param window_size: for 1D & 2D data, number of timepoints to acquire before passing
         :param EOL: optional; end of line phrase used to separate timepoints
+        :param virtual_ser_port: boolean, if True will not initialize serial port, instead will rely on user-defined
+        custom function to generate simulated data
         """
         self.commport = commport
         self.baudrate = baudrate
@@ -50,28 +53,29 @@ class SerialManager:
         self.window_size = window_size
         self.EOL = EOL
         self.ser = None
+        self.virtual_ser_port = virtual_ser_port
 
     def setup_serial(self):
         """ Sets up given serial port for a given baudrate
 
         :return: serial object
         """
-        try:
-            self.ser = serial.Serial(self.commport, self.baudrate, timeout=0.1)
-            return self.ser
-        except (OSError, serial.SerialException):
-            raise OSError("Error setting up serial port")
+        if self.virtual_ser_port:
+            pass
+        else:
+            try:
+                self.ser = serial.Serial(self.commport, self.baudrate, timeout=0.1)
+                return self.ser
+            except (OSError, serial.SerialException):
+                raise OSError("Error setting up serial port")
 
-    def acquire_data(self):
-        """ Acquire serial port data
+    def _acquire_data(self):
+        """Handler function to acquire serial port data
         Confirms validity of incoming data
 
         :return: channel data [shape: (self.window_size, self.num_channel)]
-        """
-        if self.ser is None:
-            raise ValueError(f"serial port {self.ser} must be instantiated before acquiring data\n"
-                             f"please run setup_serial()")
 
+        """
         ser_data = np.zeros((self.window_size, self.num_channel))
         channel_data = np.array([])
         # Decode incoming data into ser_data array
@@ -90,6 +94,23 @@ class SerialManager:
                 pass
             else:
                 channel_data = np.append(channel_data, ser_data[i][:])
+        return channel_data
+
+    def acquire_data(self, func=None):
+        """ Acquire serial port data
+        :param func: if None, defaults to using _acquire_data func. otherwise, use custom func to process ser data
+
+        :return: channel data [shape: (self.window_size, self.num_channel)]
+        """
+        if func is None:
+            channel_data = self._acquire_data()
+        else:
+            try:
+                channel_data = func(ser=self.ser, window_size=self.window_size, num_channel=self.num_channel)
+            except:
+                raise ValueError(f'custom function {func} must have the following variables as parameters:\n'
+                                 f'ser, window_size, num_channel')
+
         channel_data = np.reshape(channel_data, (int(len(channel_data) / self.num_channel), self.num_channel))
         if channel_data.size > 0:
             return channel_data

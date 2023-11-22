@@ -3,33 +3,29 @@ from typing import *
 from fastplotlib import Plot, GridPlot
 
 
-def create_plot(channel_key: Union[np.ndarray, str]):
+def create_plot(plot_channel_key: Union[np.ndarray, str]):
     """ Create fastplotlib Plot
 
-    :param channel_key: name of plot (should only have one element)
+    :param plot_channel_key: name of plot (should only have one element)
     :return: Plot object
     """
-    if len(channel_key) > 1:
-        raise ValueError(f"Channel Key {channel_key} should only have one name")
-
     plot = Plot(
-        name=channel_key[0]
+        name=plot_channel_key[0][0]
     )
     return plot
 
 
-def create_grid_plot(channel_key: Union[np.ndarray, str]):
+def create_grid_plot(plot_channel_key: Union[np.ndarray, str]):
     """ Create fastplotlib GridPlot (collection of subplots)
 
-    :param channel_key: names of subplots
+    :param plot_channel_key: names of subplots
     :return: GridPlot object
     """
-    grid_shape = (len(channel_key), 1)
-    names = np.transpose([channel_key]).tolist()
+    grid_shape = np.shape(plot_channel_key)
 
     grid_plot = GridPlot(
         shape=grid_shape,
-        names=names
+        names=plot_channel_key
     )
     return grid_plot
 
