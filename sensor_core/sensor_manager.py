@@ -4,7 +4,6 @@ from sensor_core.memory.mem_utils import *
 from sensor_core.utils.utils import *
 from multiprocessing import Process, freeze_support
 from threading import Thread
-from warnings import warn
 import pathlib
 
 
