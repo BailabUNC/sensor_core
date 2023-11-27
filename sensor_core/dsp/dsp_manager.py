@@ -1,4 +1,3 @@
-import sensor_core.memory.mem_manager as mm
 from sensor_core.utils.utils import DictManager
 
 import numpy as np
@@ -6,39 +5,54 @@ import scipy.signal as signal
 
 class DSPManager(DictManager):
     def __init__(self, dsp_module):
+        valid_modules = ['moving_avg', 'butterworth']
 
-        self.dsp_module = dsp_module
+        if dsp_module in valid_modules:
+            self.dsp_module = dsp_module
 
-        if (dsp_module != 'moving_avg' or dsp_module != 'butterworth'):
-            raise ValueError('Must enter valid dsp_module')
-
-        self.update_dictionary(args_dict=dsp_dict,
-            dict_type="static")
-
-        dsp_dict = {
-            "moving_avg": {"data"},
-            "butterworth": { "order": 4, "N": 100000000}
-        }
-    
-    #some function(dsp_list, **kwargs)
-    #for module in dsp_list:
-        #check for key in kwargs for subset of input
-
-    def select_dsp_mod(dsp_module, data, N, pad):
-        if (dsp_module == 'moving_avg'):
-            return DSPManager.moving_avg_filter(data, N, pad)
- 
-        elif (dsp_module == 'butterworth'):
-            min_frq = int(input("Enter min frequency cutoff"))
-            max_frq = int(input("Enter max frequency cutoff"))
-            btype = str(input("Enter 'lowpass', 'highpass', 'bandpass', or 'bandstop'"))
-            return DSPManager.butter_filter(data, min_frq, max_frq, N, btype)
         else:
-            raise ValueError("Specify 'moving_average' or 'butterworth'")
+            Warning(f"{dsp_module} is not an acceptable input for dsp_module.\n")
+
+        """dsp_dict = {
+            "moving_avg": {"N": int, "pad": str},
+            "butterworth": {"min_frq": int, "max_frq": int, "order": int, "btype": str }
+        }
+        """
+
+    def set_attributes(dsp_module, **kwargs):
+        ma_keys = ['data', 'N', 'pad']
+        bw_keys = ['data', 'order', 'min_frq', 'max_frq', 'btype']
+  
+        if (dsp_module == 'moving_avg'):
+            for key, value in kwargs.items():
+                if key in ma_keys:
+                    setattr(self, key, value)    
+
+        elif (dsp_module == 'butterworth'):
+            for key, value in kwargs.items():
+                if key in bw_keys:
+                    setattr(bw_module, key, value)
+                else:
+                    raise KeyError("Invalid butterworth parameter input") 
+           
+    
+    def select_dsp_mod(dsp_module,**kwargs):
+        
+        #return getattr(ma_module, 'moving_avg_filter')(ma_module.data, ma_module.N, ma_module.pad)
+        #getattr(bw_module, 'butter_filter')(bw_module.data, bw_module.N)  
+
+        if (dsp_module == 'moving_avg'):
+            return DSPManager.moving_avg_filter()
+        
+        if (dsp_module == 'butterworth'):
+            return DSPManager.butter_filter()
+            
+           
             
 
     @staticmethod
     def moving_avg_filter(data, N, pad):
+        """N = Window size"""
         if(pad == 'min'):
             data_arr = np.concatenate(([np.min(data)] * (N), data))
         elif(pad == 'percentile'):
@@ -48,12 +62,13 @@ class DSPManager(DictManager):
         
         cumsum = np.cumsum(data_arr)
         filtered = (cumsum[N:] - cumsum[:-N]) / N
+
         return filtered
         
     @staticmethod
-    def butter_filter(data, min_frq, max_frq, N, btype):
-        if((btype == 'lowpass') or (btype == 'highpass') or (btype == 'bandpass') or (btype == 'bandstop')):
-            b, a = signal.butter(N, [min_frq, max_frq], btype = btype, analog = False, output = 'ba', fs = 100)
+    def butter_filter(data, min_frq, max_frq, order, btype):
+        if((btype == 'lowpass') or (btype == 'highpass') or (btype == 'bandpass') or (btype == 'bandstop')): 
+            b, a = signal.butter(order, [min_frq, max_frq], btype = btype, analog = False, output = 'ba', fs = 100)
             filtered = signal.filtfilt(b, a, data)
         else:
             raise ValueError("Specify btype 'lowpass', 'highpass', 'bandpass', or 'bandstop'")
