@@ -4,7 +4,6 @@ from sensor_core.memory.mem_utils import *
 from sensor_core.utils.utils import *
 from multiprocessing import Process, freeze_support
 from threading import Thread
-from warnings import warn
 import pathlib
 
 
@@ -27,25 +26,25 @@ class SensorManager(DataManager, PlotManager):
         mutex = create_mutex()
         # Setup serial and plot channels
         self.ser_channel_key, self.plot_channel_key = self.setup_channel_keys(
-                                                         ser_channel_key=ser_channel_key,
-                                                         **kwargs)
+            ser_channel_key=ser_channel_key,
+            **kwargs)
 
         self.shm, data_shared = create_shared_block(ser_channel_key=ser_channel_key,
                                                     num_points=num_points,
                                                     dtype=dtype)
 
-        self.static_args_dict = self.create_static_dict(ser_channel_key=self.ser_channel_key,
-                                                        plot_channel_key=self.plot_channel_key,
-                                                        commport=commport,
-                                                        baudrate=baudrate,
-                                                        mutex=mutex,
-                                                        shm_name=self.shm.name,
-                                                        shape=data_shared.shape,
-                                                        dtype=dtype,
-                                                        num_points=num_points)
+        self.static_args_dict = create_static_dict(ser_channel_key=self.ser_channel_key,
+                                                   plot_channel_key=self.plot_channel_key,
+                                                   commport=commport,
+                                                   baudrate=baudrate,
+                                                   mutex=mutex,
+                                                   shm_name=self.shm.name,
+                                                   shape=data_shared.shape,
+                                                   dtype=dtype,
+                                                   num_points=num_points)
 
-        self.dynamic_args_dict = self.create_dynamic_dict(num_points=num_points,
-                                                          window_size=window_size)
+        self.dynamic_args_dict = create_dynamic_dict(num_points=num_points,
+                                                     window_size=window_size)
 
         self.dynamic_args_queue = self.setup_queue()
 
@@ -66,7 +65,7 @@ class SensorManager(DataManager, PlotManager):
 
         plot_shape = np.shape(plot_channel_key)
 
-        for key in np.reshape(plot_channel_key, newshape=(1, plot_shape[0]*plot_shape[1]))[0]:
+        for key in np.reshape(plot_channel_key, newshape=(1, plot_shape[0] * plot_shape[1]))[0]:
             if key not in ser_channel_key:
                 raise KeyError(f'plot_channel_key must include only keys within serial_channel_key')
 
@@ -107,8 +106,7 @@ class SensorManager(DataManager, PlotManager):
         return p
 
     def setup_plot(self):
-        PlotManager.__init__(self,
-                             static_args_dict=self.static_args_dict)
+        PlotManager.__init__(self, static_args_dict=self.static_args_dict)
         self.initialize_plot()
         return self.plot
 
@@ -118,8 +116,8 @@ class SensorManager(DataManager, PlotManager):
         :param kwargs: series of parameters to update
         :return: updates queue with new dictionary
         """
-        self.dynamic_args_dict = self.update_dynamic_dict(dynamic_args_dict=self.dynamic_args_dict,
-                                                          **kwargs)
+        self.dynamic_args_dict = update_dynamic_dict(dynamic_args_dict=self.dynamic_args_dict,
+                                                     **kwargs)
         self.update_queue(self.dynamic_args_queue)
 
     def setup_queue(self):
