@@ -2,12 +2,12 @@ from sensor_core.utils.utils import DictManager
 import numpy as np
 import scipy.signal as signal
 
-class DSPManager(DictManager):
+class DSPManager():
     def _init_(self, dsp_modules_queue: np.array([]), dsp_modules: dict = None):
         """Initialize empty array and create empty dictionary
-        :param dsp_modules: Array of dsp_module objects, identified by user-defined name, target algo, and key parameters
-        :param dsp_dict: master dsp_module dictionary
-        :param dict_type: Dynamic dictionary """
+        :param dsp_modules_queue: Array of dsp_module object names
+        :param dsp_modules: master dsp_module dictionary of dsp_modules containing, name, algo, and key parameters
+        """
 
         self.dsp_modules = {}
         self.dsp_modules_queue = []
@@ -81,6 +81,10 @@ class DSPManager(DictManager):
     
     @staticmethod
     def butterworth_filter(data, min_frq: int, max_frq: int, order: int, btype: str):
+        #TODO: Allow min_frq or max_frq to be optional if btype is 'lowpass' or 'highpass'
+        # Set some arbitrary high frequency for max_frq if highpass
+        # Set frequency to some number like 0 for min_frq if lowpass
+
         if (btype == 'lowpass') or (btype == 'highpass') or (btype == 'bandpass') or (btype == 'bandstop'):
             b, a = signal.butter(order, [min_frq, max_frq], btype = btype, analog = False, output = 'ba', fs = 100)
             filtered = signal.filtfilt(b, a, data)
