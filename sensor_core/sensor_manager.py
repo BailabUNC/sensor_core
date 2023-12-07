@@ -1,5 +1,6 @@
 from sensor_core.data import DataManager
 from sensor_core.plot import PlotManager
+from sensor_core.memory.strg_manager import StorageManager
 from sensor_core.memory.mem_utils import *
 from sensor_core.utils.utils import *
 from multiprocessing import Process, freeze_support
@@ -7,7 +8,7 @@ from threading import Thread
 import pathlib
 
 
-class SensorManager(DataManager, PlotManager):
+class SensorManager(DataManager, PlotManager, StorageManager):
     def __init__(self, ser_channel_key: Union[np.ndarray, str], commport: str,
                  baudrate: int = 115200, num_points: int = 1000, window_size: int = 1,
                  dtype=np.float64, **kwargs):
@@ -26,8 +27,8 @@ class SensorManager(DataManager, PlotManager):
         mutex = create_mutex()
         # Setup serial and plot channels
         self.ser_channel_key, self.plot_channel_key = self.setup_channel_keys(
-            ser_channel_key=ser_channel_key,
-            **kwargs)
+                                                      ser_channel_key=ser_channel_key,
+                                                      **kwargs)
 
         self.shm, data_shared = create_shared_block(ser_channel_key=ser_channel_key,
                                                     num_points=num_points,
@@ -105,10 +106,19 @@ class SensorManager(DataManager, PlotManager):
 
         return p
 
-    def setup_plot(self):
-        PlotManager.__init__(self, static_args_dict=self.static_args_dict)
-        self.initialize_plot()
-        return self.plot
+    def setup_plotting_process(self):
+        """ Initialize dedicated process to update plot
+        :return: pointer to process and plot object
+        """
+        pm = PlotManager(static_args_dict=self.static_args_dict)
+        if self.os_flag == 'win':
+            p = Thread(name='plot',
+                       target=pm.online_grid_plot_data)
+        else:
+            p = Process(name='plot',
+                        target=pm.online_grid_plot_data)
+        return p, pm.plot
+
 
     def update_params(self, **kwargs):
         """ Check validity and update parameters

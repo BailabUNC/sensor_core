@@ -98,8 +98,8 @@ class DataManager(SerialManager, DictManager, StorageManager):
                         self._online_update_data(curr_data=data_shared, new_data=ys,
                                                  serial_window_length=serial_window_length)
                     else:
-                        data = self._online_update_data(curr_data=data_shared, new_data=ys,
-                                                        serial_window_length=serial_window_length)
+                        data = np.copy(self._online_update_data(curr_data=data_shared, new_data=ys,
+                                                        serial_window_length=serial_window_length))
                         for i in range(self.shape[0] - 1):
                             save_data = data[i + 1][:]
                             self.append_serial_channel(key=self.ser_channel_key[i],

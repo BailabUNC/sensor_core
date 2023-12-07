@@ -8,6 +8,9 @@ from sensor_core.utils.utils import DictManager
 
 class PlotManager(DictManager):
     def __init__(self, static_args_dict):
+        """ Initialize Plot Manager Class
+        :param static_args_dict: dictionary containing key parameters for initialization
+        """
         DictManager.__init__(self)
 
         self.select_dictionary(args_dict=static_args_dict,
@@ -21,6 +24,11 @@ class PlotManager(DictManager):
             self.grid_plot_flag = False
         self.plot = None
 
+        # Initialize plot
+        self.initialize_plot()
+        # Add animation function
+        self.plot.add_animations(self.online_grid_plot_data)
+
     def initialize_plot(self):
         """ Handler for initializing Plot/GridPlot
         :return: Calls function to initialize Plot or GridPlot
@@ -30,7 +38,6 @@ class PlotManager(DictManager):
             self.plot = self._initialize_grid_plot()
         else:
             self.plot = self._initialize_plot()
-        return self.plot
 
     def _initialize_plot(self):
         """ Initialize Plot object and data
