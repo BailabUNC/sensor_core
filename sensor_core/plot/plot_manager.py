@@ -17,67 +17,31 @@ class PlotManager(DictManager):
                                dict_type="static")
         # Unpack static_args_dict
         self.unpack_selected_dict()
-        # Set grid_plot_flag
-        if self.num_channel > 1:
-            self.grid_plot_flag = True
-        else:
-            self.grid_plot_flag = False
-        self.plot = None
+        self.fig = None
 
-        # Initialize plot
-        self.initialize_plot()
+        # Initialize figure
+        self.initialize_fig()
+
         # Add animation function
-        self.plot.add_animations(self.online_grid_plot_data)
+        self.fig.add_animations(self.online_plot_data)
 
-    def initialize_plot(self):
-        """ Handler for initializing Plot/GridPlot
-        :return: Calls function to initialize Plot or GridPlot
+
+    def initialize_fig(self):
+        """ Initialize Figure object and data
+        :return: Figure object and data
         """
-
-        if self.grid_plot_flag:
-            self.plot = self._initialize_grid_plot()
-        else:
-            self.plot = self._initialize_plot()
-
-    def _initialize_plot(self):
-        """ Initialize Plot object and data
-        :return: Plot object and data
-        """
-        plot = create_plot(plot_channel_key=self.plot_channel_key)
-        xs, ys = initialize_plot_data(num_points=self.num_points)
-        plot_data = np.dstack([xs, ys])[0]
-        plot.add_line(data=plot_data, name=self.plot_channel_key[0][0], cmap='jet')
-        plot.auto_scale(maintain_aspect=False)
-        return plot
-
-    def _initialize_grid_plot(self):
-        """ Initialize GridPlot object and data
-        :return: GridPlot object and data
-        """
-        grid_plot = create_grid_plot(plot_channel_key=self.plot_channel_key)
-        xs, ys = initialize_grid_plot_data(num_channel=self.num_channel, num_points=self.num_points)
-        for i, subplot in enumerate(grid_plot):
+        fig = create_fig(plot_channel_key=self.plot_channel_key)
+        xs, ys = initialize_fig_data(num_channel=self.num_channel, num_points=self.num_points)
+        for i, subplot in enumerate(fig):
             idx = divmod(i, np.shape(self.plot_channel_key)[1])
             plot_data = np.dstack([xs, ys[i]])[0]
             subplot.add_line(data=plot_data, name=self.plot_channel_key[idx[0]][idx[1]], cmap='jet')
-        return grid_plot
+        self.fig = fig
+        return fig
+
 
     def online_plot_data(self):
-        """ Update Plot data with shared memory object data
-        :return: no explicit return. Updates Plot data, next render cycle will show updated data
-        """
-        # Acquire Shared Memory Object data
-        mm.acquire_mutex(self.mutex)
-        shm = SharedMemory(self.shm_name)
-        data_shared = np.ndarray(shape=self.shape, dtype=self.dtype,
-                                 buffer=shm.buf)
-        data = np.dstack([data_shared[0], data_shared[1]])[0]
-        self.plot[self.plot_channel_key[0][0]].data = data
-        self.plot.auto_scale(maintain_aspect=False)
-        mm.release_mutex(self.mutex)
-
-    def online_grid_plot_data(self):
-        """ Update GridPlot data with shared memory object data
+        """ Update subplot data with shared memory object data
         :return: no explicit return. Updates GridPlot data, next render cycle will show updated data
         """
         # Acquire Shared Memory Object data
@@ -85,7 +49,7 @@ class PlotManager(DictManager):
         shm = SharedMemory(self.shm_name)
         data_shared = np.ndarray(shape=self.shape, dtype=self.dtype,
                                  buffer=shm.buf)
-        for i, subplot in enumerate(self.plot):
+        for i, subplot in enumerate(self.fig):
             idx = divmod(i, np.shape(self.plot_channel_key)[1])
             data = np.dstack([data_shared[0], data_shared[i + 1]])[0]
             subplot[self.plot_channel_key[idx[0]][idx[1]]].data = data
@@ -131,14 +95,14 @@ class PlotManager(DictManager):
             if not ys[i][:]:
                 ys[i][:] = np.ones(1000) * np.linspace(0, 1, 1000)
 
-        plot = create_grid_plot(plot_channel_key=plot_channel_keys)
+        fig = create_fig(plot_channel_key=plot_channel_keys)
 
-        for i, subplot in enumerate(plot):
+        for i, subplot in enumerate(fig):
             idx = divmod(i, np.shape(plot_channel_keys)[1])
             data = np.dstack([xs, ys[i]])[0]
             subplot.add_line(data=data, name=plot_channel_keys[idx[0]][idx[1]], cmap='jet')
             subplot.auto_scale(maintain_aspect=False)
 
-        plot.show()
+        fig.show()
 
-        return plot
+        return fig
