@@ -31,7 +31,7 @@ def release_mutex(mutex):
 
 
 def create_shared_block(ser_channel_key: Union[np.ndarray, str],
-                        num_points: int = 1000, dtype=np.float64):
+                        num_points: int = 1000, dtype=np.float32):
     """ Create Shared Memory Block for global access to streamed data
 
     :param ser_channel_key: list of channel names
@@ -39,13 +39,9 @@ def create_shared_block(ser_channel_key: Union[np.ndarray, str],
     :param dtype: data type, default 64-bit integer
     :return: shm (shared memory object), data_shared (initial data), plot (Plot/GridPlot object)
     """
-    if np.shape(ser_channel_key)[0] > 1:
-        xs, ys = initialize_grid_plot_data(num_channel=len(ser_channel_key),
-                                           num_points=num_points)
-        data = np.vstack((xs, ys))
-    else:
-        xs, ys = initialize_plot_data(num_points=num_points)
-        data = np.vstack([xs, ys])
+    xs, ys = initialize_fig_data(num_channel=len(ser_channel_key),
+                                       num_points=num_points)
+    data = np.vstack((xs, ys))
 
     shm = SharedMemory(create=True, size=data.nbytes)
     data_shared = np.ndarray(shape=data.shape,

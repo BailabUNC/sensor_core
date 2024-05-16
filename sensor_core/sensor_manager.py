@@ -113,11 +113,11 @@ class SensorManager(DataManager, PlotManager, StorageManager):
         pm = PlotManager(static_args_dict=self.static_args_dict)
         if self.os_flag == 'win':
             p = Thread(name='plot',
-                       target=pm.online_grid_plot_data)
+                       target=pm.online_plot_data)
         else:
             p = Process(name='plot',
-                        target=pm.online_grid_plot_data)
-        return p, pm.plot
+                        target=pm.online_plot_data)
+        return p, pm.fig
 
 
     def update_params(self, **kwargs):
