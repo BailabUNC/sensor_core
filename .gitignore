@@ -1,5 +1,6 @@
-~/MABOS_core/MABOS_core/__pycache__/
-~/MABOS_core/MABOS_core/plot/__pycache__/
-~/MABOS_core/MABOS_core/mem/__pycache__/
-~/MABOS_core/MABOS_core/data/__pycache__/
-~/MABOS_core/MABOS_core/serial/__pycache__/
+sensor_core/__pycache__/
+sensor_core/plot/__pycache__/
+sensor_core/mem/__pycache__/
+sensor_core/data/__pycache__/
+sensor_core/serial/__pycache__/
+sensor_core/examples/.ipynb_checkpoints/
