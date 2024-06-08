@@ -6,6 +6,16 @@ from multiprocessing.shared_memory import SharedMemory
 from sensor_core.utils.utils import DictManager
 
 
+
+def run_once(f):
+    def wrapper(*args, **kwargs):
+        if not wrapper.has_run:
+            wrapper.has_run = True
+            return f(*args, **kwargs)
+    wrapper.has_run = False
+    return wrapper
+
+
 class PlotManager(DictManager):
     def __init__(self, static_args_dict):
         """ Initialize Plot Manager Class
@@ -51,7 +61,7 @@ class PlotManager(DictManager):
                                  buffer=shm.buf)
         for i, subplot in enumerate(self.fig):
             idx = divmod(i, np.shape(self.plot_channel_key)[1])
-            data = np.dstack([data_shared[0], data_shared[i + 1]])[0]
+            data = np.dstack([memoryview(data_shared[0]), memoryview(data_shared[i + 1])])[0]
             subplot[self.plot_channel_key[idx[0]][idx[1]]].data = data
             subplot.auto_scale(maintain_aspect=False)
         mm.release_mutex(self.mutex)
