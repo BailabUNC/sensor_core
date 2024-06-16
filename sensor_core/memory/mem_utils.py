@@ -36,7 +36,7 @@ def create_shared_block(ser_channel_key: Union[np.ndarray, str],
 
     :param ser_channel_key: list of channel names
     :param num_points: number of 'time' points [num_points = time(s) * Hz]
-    :param dtype: data type, default 64-bit integer
+    :param dtype: data type, default 32-bit float
     :return: shm (shared memory object), data_shared (initial data), plot (Plot/GridPlot object)
     """
     xs, ys = initialize_fig_data(num_channel=len(ser_channel_key),

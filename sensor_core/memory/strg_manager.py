@@ -70,11 +70,19 @@ class StorageManager:
                                  shape=(1, 1),
                                  chunks=True,
                                  maxshape=(1, None))
+            # Add time
+            f.create_dataset(name='time',
+                             shape=(1,1),
+                             chunks=True,
+                             maxshape=(1,None))
             f.close()
         elif self.filetype == ".sqlite3":
             for i, key in enumerate(self.channel_key):
                 create_sqlite3_file(filepath=self.filepath,
                                     key=key)
+            # Add time
+            create_sqlite3_file(filepath=self.filepath,
+                                key='time')
 
     @staticmethod
     def load_serial_database(filepath: str = './serial_db.sqlite3', filetype: str = None):

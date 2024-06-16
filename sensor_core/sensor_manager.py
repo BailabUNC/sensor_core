@@ -8,6 +8,7 @@ from threading import Thread
 import pathlib
 
 
+
 class SensorManager(DataManager, PlotManager, StorageManager):
     def __init__(self, ser_channel_key: Union[np.ndarray, str], commport: str,
                  baudrate: int = 115200, num_points: int = 1000, window_size: int = 1,
@@ -117,6 +118,7 @@ class SensorManager(DataManager, PlotManager, StorageManager):
         else:
             p = Process(name='plot',
                         target=pm.online_plot_data)
+
         return p, pm.fig
 
 

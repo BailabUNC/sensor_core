@@ -1,4 +1,5 @@
 import numpy as np
+from datetime import datetime
 import sensor_core.memory as mm
 from sensor_core.serial import SerialManager
 from sensor_core.utils import DictManager
@@ -96,31 +97,37 @@ class DataManager(SerialManager, DictManager, StorageManager):
                     accumulated_frames += serial_window_length
                     if accumulated_frames < self.num_points:
                         self._online_update_data(curr_data=data_shared, new_data=ys,
-                                                 serial_window_length=serial_window_length)
+                                                 serial_window_length=serial_window_length,
+                                                 mutex=self.mutex)
                     else:
                         data = np.copy(self._online_update_data(curr_data=data_shared, new_data=ys,
-                                                        serial_window_length=serial_window_length))
+                                                        serial_window_length=serial_window_length,
+                                                        mutex=self.mutex))
                         for i in range(self.shape[0] - 1):
                             save_data = data[i + 1][:]
                             self.append_serial_channel(key=self.ser_channel_key[i],
                                                        data=save_data)
+                        self.append_serial_channel(key='time',
+                                                   data=datetime.now())
                         accumulated_frames = 0
 
                 else:
                     self._online_update_data(curr_data=data_shared, new_data=ys,
-                                             serial_window_length=serial_window_length)
+                                             serial_window_length=serial_window_length,
+                                             mutex=self.mutex)
 
-                # Release mutex
-                mm.release_mutex(self.mutex)
 
-    def _online_update_data(self, curr_data, new_data, serial_window_length):
+    def _online_update_data(self, curr_data, new_data, serial_window_length, mutex):
         """ Function that handles rolling buffer update for the online_update_data
         :param curr_data: current/original data to update
         :param new_data: serial/new data to append
         :param serial_window_length: number of time points to update (append/pop)
+        :param mutex: exclusion lock on shared memory object
 
         """
         for i in range(self.shape[0] - 1):
             curr_data[i + 1][:-serial_window_length] = curr_data[i + 1][serial_window_length:]
             curr_data[i + 1][-serial_window_length:] = new_data[:, i]
+        # Release Mutex
+        mm.release_mutex(mutex)
         return curr_data

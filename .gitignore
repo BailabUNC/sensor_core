@@ -4,3 +4,4 @@ sensor_core/mem/__pycache__/
 sensor_core/data/__pycache__/
 sensor_core/serial/__pycache__/
 sensor_core/examples/.ipynb_checkpoints/
+*.sqlite3
