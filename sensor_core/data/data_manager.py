@@ -1,4 +1,5 @@
 import numpy as np
+from datetime import datetime
 import sensor_core.memory as mm
 from sensor_core.serial import SerialManager
 from sensor_core.utils import DictManager
@@ -106,6 +107,8 @@ class DataManager(SerialManager, DictManager, StorageManager):
                             save_data = data[i + 1][:]
                             self.append_serial_channel(key=self.ser_channel_key[i],
                                                        data=save_data)
+                        self.append_serial_channel(key='time',
+                                                   data=datetime.now())
                         accumulated_frames = 0
 
                 else:
