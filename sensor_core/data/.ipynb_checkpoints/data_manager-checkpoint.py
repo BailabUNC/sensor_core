@@ -108,7 +108,7 @@ class DataManager(SerialManager, DictManager, StorageManager):
                             self.append_serial_channel(key=self.ser_channel_key[i],
                                                        data=save_data)
                         self.append_serial_channel(key='time',
-                                                   data=datetime.now)
+                                                   data=datetime.now())
                         accumulated_frames = 0
 
                 else:
