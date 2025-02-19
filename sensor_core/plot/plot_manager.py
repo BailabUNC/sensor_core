@@ -41,10 +41,10 @@ class PlotManager(DictManager):
         :return: Figure object and data
         """
         fig = create_fig(plot_channel_key=self.plot_channel_key)
-        xs, ys = initialize_fig_data(num_channel=self.num_channel, num_points=self.num_points)
+        ys = initialize_fig_data(num_channel=self.num_channel, num_points=self.num_points)
         for i, subplot in enumerate(fig):
             idx = divmod(i, np.shape(self.plot_channel_key)[1])
-            plot_data = np.dstack([xs, ys[i]])[0]
+            plot_data = ys[i]
             subplot.add_line(data=plot_data, name=self.plot_channel_key[idx[0]][idx[1]], cmap='jet')
         self.fig = fig
         return fig
@@ -61,8 +61,8 @@ class PlotManager(DictManager):
                                  buffer=shm.buf)
         for i, subplot in enumerate(self.fig):
             idx = divmod(i, np.shape(self.plot_channel_key)[1])
-            data = np.dstack([memoryview(data_shared[0]), memoryview(data_shared[i + 1])])[0]
-            subplot[self.plot_channel_key[idx[0]][idx[1]]].data = data
+            data = memoryview(data_shared[i])
+            subplot[self.plot_channel_key[idx[0]][idx[1]]].data[:,1] = data
             subplot.auto_scale(maintain_aspect=False)
         mm.release_mutex(self.mutex)
 
@@ -100,7 +100,7 @@ class PlotManager(DictManager):
         else:
             plot_channel_keys = plot_channel_key
 
-        xs, ys = cls.offline_initialize_data(filepath=filepath, plot_channel_key=plot_channel_keys)
+        ys = cls.offline_initialize_data(filepath=filepath, plot_channel_key=plot_channel_keys)
         for i in range(np.shape(plot_channel_keys)[0]*np.shape(plot_channel_keys)[1]):
             if not ys[i][:]:
                 ys[i][:] = np.ones(1000) * np.linspace(0, 1, 1000)
@@ -109,8 +109,7 @@ class PlotManager(DictManager):
 
         for i, subplot in enumerate(fig):
             idx = divmod(i, np.shape(plot_channel_keys)[1])
-            data = np.dstack([xs, ys[i]])[0]
-            subplot.add_line(data=data, name=plot_channel_keys[idx[0]][idx[1]], cmap='jet')
+            subplot.add_line(data=ys[i], name=plot_channel_keys[idx[0]][idx[1]], cmap='jet')
             subplot.auto_scale(maintain_aspect=False)
 
         fig.show()

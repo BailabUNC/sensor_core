@@ -125,9 +125,9 @@ class DataManager(SerialManager, DictManager, StorageManager):
         :param mutex: exclusion lock on shared memory object
 
         """
-        for i in range(self.shape[0] - 1):
-            curr_data[i + 1][:-serial_window_length] = curr_data[i + 1][serial_window_length:]
-            curr_data[i + 1][-serial_window_length:] = new_data[:, i]
+        for i in range(self.shape[0]):
+            curr_data[i][:-serial_window_length] = curr_data[i][serial_window_length:]
+            curr_data[i][-serial_window_length:] = new_data[:, i]
         # Release Mutex
         mm.release_mutex(mutex)
         return curr_data
