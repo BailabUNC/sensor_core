@@ -25,6 +25,5 @@ def initialize_fig_data(num_channel: int, num_points: int):
     :param num_points: number of 'time' points [num_points = time(s) * Hz]
     :return: x and y arrays [y array has shape (num_channel, num_points)]
     """
-    xs = [np.linspace(0, num_points - 1, num_points)]
     ys = np.ones((num_channel, num_points)) * np.linspace(0, 1, num_points)
-    return xs, ys
+    return ys
