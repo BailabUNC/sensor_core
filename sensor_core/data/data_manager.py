@@ -1,16 +1,19 @@
+from sensor_core.utils.metrics import RingMetrics, timer
+from sensor_core.memory.ring_adapter import RingBuffer
 import numpy as np
-from datetime import datetime
-import sensor_core.memory as mm
+from sensor_core.memory.mem_utils import _assert_ring_layout
 from sensor_core.serial import SerialManager
 from sensor_core.utils import DictManager
 from sensor_core.memory.strg_manager import StorageManager
+from time import perf_counter
+import time, traceback
 
 
 class DataManager(SerialManager, DictManager, StorageManager):
     def __init__(self, static_args_dict: dict, dynamic_args_queue, virtual_ser_port: bool = False,
-                 save_data: bool = False, filepath: str = None, overwrite_data: bool = True):
-        """ Initialize Online Data Manager - handles serial port initialization and management
-        of data for the online (real-time) use case ONL
+                 save_data: bool = False, filepath: str = None, overwrite_data: bool = True, metrics_proxy=None):
+        """ Online Data Manager
+        - handles serial port initialization and management of data for the online (real-time) use case ONL
         :param static_args_dict: dictionary containing key parameters for initialization
         :param dynamic_args_queue: queue used to send dictionary with dynamic parameters
         :param virtual_ser_port: boolean, if True will not initialize serial port, instead will rely on user-defined
@@ -19,9 +22,11 @@ class DataManager(SerialManager, DictManager, StorageManager):
         :param filepath: filepath to save data to
         :param overwrite_data: boolean, decides whether to overwrite existing saved data
         """
+        self.metrics = RingMetrics()
         self.static_args_dict = static_args_dict
         self.dynamic_args_queue = dynamic_args_queue
         self.save_data = save_data
+        self._metrics_proxy = metrics_proxy
 
         # Initialize DictManager Subclass
         DictManager.__init__(self)
@@ -32,6 +37,8 @@ class DataManager(SerialManager, DictManager, StorageManager):
 
         self.unpack_selected_dict()
 
+        self.ring = RingBuffer(self.shm_name, int(self.ring_capacity), tuple(self.shape), self.dtype, create=False)
+        _assert_ring_layout(self.ring, tuple(self.shape), self.dtype)
         # Unpack dynamic_args_dict if it exists
         try:
             self.dynamic_args_dict = self.dynamic_args_queue.get()
@@ -65,69 +72,46 @@ class DataManager(SerialManager, DictManager, StorageManager):
         self.setup_serial()
 
     def online_update_data(self, func=None):
-        """ Update data in real time
-        :save_data: if flag is True, will continuously save data to hdf5 or sqlite3 file
-        :param func: optional custom function for serial data acquisition handler
-        """
-        accumulated_frames = 0
-
+        last_push = perf_counter()
         while True:
             try:
-                if self.dynamic_args_queue.empty():
-                    pass
-                else:
-                    self.dynamic_args_dict = self.dynamic_args_queue.get()
-                    self.select_dictionary(args_dict=self.dynamic_args_dict,
-                                           dict_type="dynamic")
-                    self.unpack_selected_dict()
-            except:
-                self.window_size = 1
+                with timer(lambda ms: self.metrics.add_acquire_ms(ms)):  # reusing bucket if you like; or add another
+                    ys = self.acquire_data(func=func)
+                if ys is None:
+                    print("[writer] acquire_data -> None")
+                    continue
 
-            ys = self.acquire_data(func=func)
-            if ys is not None:
-                serial_window_length = np.shape(ys)[0]
-                shm = mm.SharedMemory(self.shm_name)
-                # Acquire mutex
-                mm.acquire_mutex(self.mutex)
-                # Load shared memory object
-                data_shared = np.ndarray(shape=self.shape, dtype=self.dtype,
-                                         buffer=shm.buf)
+                arr = np.asarray(ys)
+                if arr.ndim != 2:
+                    raise ValueError(f"[writer] ys ndim={arr.ndim}, expected 2 (L,C), got {arr.shape}")
 
-                if self.save_data:
-                    accumulated_frames += serial_window_length
-                    if accumulated_frames < self.num_points:
-                        self._online_update_data(curr_data=data_shared, new_data=ys,
-                                                 serial_window_length=serial_window_length,
-                                                 mutex=self.mutex)
-                    else:
-                        data = np.copy(self._online_update_data(curr_data=data_shared, new_data=ys,
-                                                        serial_window_length=serial_window_length,
-                                                        mutex=self.mutex))
-                        for i in range(self.shape[0] - 1):
-                            save_data = data[i + 1][:]
-                            self.append_serial_channel(key=self.ser_channel_key[i],
-                                                       data=save_data)
-                        self.append_serial_channel(key='time',
-                                                   data=datetime.now())
-                        accumulated_frames = 0
+                L_in, C_in = arr.shape
+                C_ring, L_ring = self.shape  # ring frame is (C, L)
 
-                else:
-                    self._online_update_data(curr_data=data_shared, new_data=ys,
-                                             serial_window_length=serial_window_length,
-                                             mutex=self.mutex)
+                if C_in != C_ring:
+                    raise ValueError(f"[writer] channels mismatch: ys (L,{C_in}), ring expects C={C_ring}")
+
+                # Clamp to ring L
+                L = min(L_in, L_ring)
+                if L != L_ring:
+                    arr = arr[:L, :]
+
+                # Confirm frame is contiguous and transpose, then publish to ring
+                frame = np.ascontiguousarray(arr.T, dtype=np.float32)
+                with timer(lambda ms: self.metrics.note_publish(ms, write_idx=int(self.ring.write_idx))):
+                    self.ring.publish(frame)
+
+                wi = int(self.ring.write_idx)
+                self.metrics.last_write_idx = wi
+
+                now = perf_counter()
+                if self._metrics_proxy is not None and (now - last_push) > 0.5:
+                    self._metrics_proxy.update(self.metrics.snapshot())
+                    last_push = now
+
+            except Exception as e:
+                print("[writer] EXCEPTION:", repr(e))
+                traceback.print_exc()
+                time.sleep(0.05)
 
 
-    def _online_update_data(self, curr_data, new_data, serial_window_length, mutex):
-        """ Function that handles rolling buffer update for the online_update_data
-        :param curr_data: current/original data to update
-        :param new_data: serial/new data to append
-        :param serial_window_length: number of time points to update (append/pop)
-        :param mutex: exclusion lock on shared memory object
-
-        """
-        for i in range(self.shape[0]):
-            curr_data[i][:-serial_window_length] = curr_data[i][serial_window_length:]
-            curr_data[i][-serial_window_length:] = new_data[:, i]
-        # Release Mutex
-        mm.release_mutex(mutex)
-        return curr_data

@@ -111,7 +111,7 @@ class SerialManager:
                 raise ValueError(f'custom function {func} must have the following variables as parameters:\n'
                                  f'ser, window_size, num_channel')
 
-        channel_data = np.reshape(channel_data, (int(len(channel_data) / self.num_channel), self.num_channel))
+        channel_data = np.reshape(channel_data, (self.window_size, self.num_channel))
         if channel_data.size > 0:
             return channel_data
         else:

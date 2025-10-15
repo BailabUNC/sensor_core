@@ -29,8 +29,8 @@ def create_static_dict(ser_channel_key: Union[np.ndarray, str], plot_channel_key
     :return: static_args_dict, dictionary containing all static parameters
     """
     valid_keys = ['ser_channel_key', 'plot_channel_key',
-                  'commport', 'baudrate', 'mutex',
-                  'shm_name', 'shape', 'dtype', 'EOL',
+                  'commport', 'baudrate', 'shm_name',
+                  'shape', 'dtype', 'EOL', 'ring_capacity',
                   'num_points', 'num_channel']
     static_args_dict = {
         "ser_channel_key": ser_channel_key,
@@ -74,9 +74,9 @@ def update_static_dict(static_args_dict: dict, **kwargs):
     :param kwargs: all parameters you wish to update
     :return: static_args_dict. Dictionary containing all static parameters
     """
-    valid_keys = ['ser_channel_key', 'plot_channel_key,'
-                                     'commport', 'baudrate', 'mutex',
-                  'shm_name', 'shape', 'dtype', 'EOL',
+    valid_keys = ['ser_channel_key', 'plot_channel_key',
+                  'commport', 'baudrate', 'shm_name',
+                  'shape', 'dtype', 'EOL', 'ring_capacity',
                   'num_points', 'num_channel']
     for key in kwargs:
         if key in valid_keys:
@@ -135,8 +135,8 @@ class DictManager(object):
         """ Unpack static parameter dictionary for online/real-time use
         :return: adds attributes to self for each key in dict
         """
-        essential_keys = ['ser_channel_key', "plot_channel_key", 'commport', 'baudrate',
-                          'mutex', 'shm_name', 'shape', 'dtype']
+        essential_keys = ['ser_channel_key', "plot_channel_key", 'commport',
+                          'baudrate', 'shm_name', 'shape', 'dtype', 'ring_capacity']
         optional_keys = ['EOL', 'num_points', 'num_channel']
 
         for key in essential_keys:

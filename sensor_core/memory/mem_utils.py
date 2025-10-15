@@ -1,52 +1,45 @@
-import multiprocessing
-from typing import *
-from multiprocessing.shared_memory import SharedMemory
-from sensor_core.plot.plot_utils import *
 import numpy as np
+from typing import Tuple
+try:
+    from sensor_core.memory.ring_adapter import RingBuffer
+except Exception as e:
+    RingBuffer = None  # will raise when used
 
-
-def create_mutex():
-    """ Create Mutual Exclusion Lock
-
-    :return: mutex object
+def initialize_ring(
+    ser_channel_key,
+    window_size: int,
+    frames_capacity: int = 4096,
+    dtype = np.float32,
+    shm_name: str = "/sensor_ring",
+    create: bool = True
+) -> Tuple["RingBuffer", Tuple[int, int]]:
+    """Create/open the shared-memory ring buffer.
+    :param ser_channel_key: list of serial channel names
+    :param window_size: for 1D data, number of time points to acquire before passing
+    :param frames_capacity: number of frames ring buffer can hold
+    :param dtype: data type (default 32-bit float)
+    :param shm_name: name of ring_buffer
+    :param create: flag to initialize (true) or reference (false) ring buffer
+    Returns (ring, frame_shape) where frame_shape == (C, S).
     """
-    mutex = multiprocessing.Lock()
-    return mutex
+    if RingBuffer is None:
+        raise RuntimeError("RingBuffer adapter not available; build/install native 'fastring' first")
 
+    C = int(np.prod(np.shape(ser_channel_key)))
+    S = int(window_size)
+    frame_shape = (C, S)
+    dtype = np.float32
+    ring = RingBuffer(shm_name, frames_capacity, frame_shape, dtype=dtype, create=create)
+    return ring, frame_shape
 
-def acquire_mutex(mutex):
-    """ Acquire Mutual Exclusion Lock
-
-    :param mutex: mutex object
+def _assert_ring_layout(ring, expected_shape, expected_dtype):
+    """ Safety lock for Ring Buffer
+    :param ring: ring buffer object
+    :param expected_shape: expected shape of ring buffer frame
+    :param expected_dtype: expected data type of ring buffer
     """
-    mutex.acquire()
-
-
-def release_mutex(mutex):
-    """ Release Mutual Exclusion Lock
-
-    :param mutex: mutex object
-    """
-    mutex.release()
-
-
-def create_shared_block(ser_channel_key: Union[np.ndarray, str],
-                        num_points: int = 1000, dtype=np.float32):
-    """ Create Shared Memory Block for global access to streamed data
-
-    :param ser_channel_key: list of channel names
-    :param num_points: number of 'time' points [num_points = time(s) * Hz]
-    :param dtype: data type, default 32-bit float
-    :return: shm (shared memory object), data_shared (initial data), plot (Plot/GridPlot object)
-    """
-    data = initialize_fig_data(num_channel=len(ser_channel_key),
-                             num_points=num_points)
-
-    shm = SharedMemory(create=True, size=data.nbytes)
-    data_shared = np.ndarray(shape=data.shape,
-                             dtype=dtype, buffer=shm.buf)
-    data_shared[:] = data[:]
-
-    del data
-
-    return shm, data_shared
+    expected_bytes = np.dtype(expected_dtype).itemsize * int(np.prod(expected_shape))
+    assert int(ring.frame_bytes) == expected_bytes, (
+        f"frame_bytes mismatch: ring={ring.frame_bytes}, "
+        f"expected={expected_bytes} for shape={expected_shape}, dtype={expected_dtype}"
+    )

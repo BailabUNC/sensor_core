@@ -1,0 +1,25 @@
+[build-system]
+requires = [
+  "setuptools>=68",
+  "wheel",
+  "pybind11>=2.13.0",
+  "numpy>=1.26"
+]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "sensor_core"
+version = "1.0.0"
+description = "Core API for plotting sensor data in real-time"
+requires-python = ">=3.9"
+dependencies = [
+  "numpy",
+  "pygfx>=0.1.13",
+  "jupyterlab",
+  "pyserial",
+  "fastplotlib",
+  "h5py",
+]
+
+[tool.setuptools.packages.find]
+include = ["sensor_core*"]
