@@ -3,7 +3,7 @@ from sensor_core.plot import PlotManager
 from sensor_core.memory.strg_manager import StorageManager
 from sensor_core.memory.mem_utils import *
 from sensor_core.utils.utils import *
-from multiprocessing import Process, freeze_support
+from multiprocessing import Process, freeze_support, Manager
 from threading import Thread
 import pathlib
 
@@ -12,7 +12,7 @@ import pathlib
 class SensorManager(DataManager, PlotManager, StorageManager):
     def __init__(self, ser_channel_key: Union[np.ndarray, str], commport: str,
                  baudrate: int = 115200, num_points: int = 1000, window_size: int = 1,
-                 dtype=np.float64, **kwargs):
+                 dtype=np.float32, **kwargs):
         """ Initialize SensorManager Class
         Initializes serial port, shared memory object, and kwarg dictionary (args_dict)
         :param serial_channel_key: list of serial channel names
@@ -24,31 +24,38 @@ class SensorManager(DataManager, PlotManager, StorageManager):
         """
         # Defines start method for multiprocessing. Necessary for windows and macOS
         self.os_flag = setup_process_start_method()
-        # Create mutex to manage access to shared memory object
-        mutex = create_mutex()
+
         # Setup serial and plot channels
         self.ser_channel_key, self.plot_channel_key = self.setup_channel_keys(
                                                       ser_channel_key=ser_channel_key,
                                                       **kwargs)
 
-        self.shm, data_shared = create_shared_block(ser_channel_key=ser_channel_key,
-                                                    num_points=num_points,
-                                                    dtype=dtype)
+        self.ring, frame_shape = initialize_ring(ser_channel_key=ser_channel_key,
+                                            window_size=window_size,
+                                            dtype=np.float32)
 
         self.static_args_dict = create_static_dict(ser_channel_key=self.ser_channel_key,
                                                    plot_channel_key=self.plot_channel_key,
                                                    commport=commport,
                                                    baudrate=baudrate,
-                                                   mutex=mutex,
-                                                   shm_name=self.shm.name,
-                                                   shape=data_shared.shape,
+                                                   shm_name='/sensor_ring',
+                                                   shape=frame_shape,
                                                    dtype=dtype,
+                                                   ring_capacity=4096,
                                                    num_points=num_points)
 
         self.dynamic_args_dict = create_dynamic_dict(num_points=num_points,
                                                      window_size=window_size)
 
         self.dynamic_args_queue = self.setup_queue()
+
+        # Make shared proxies for metrics
+        self._mp_manager = Manager()
+        self.writer_metrics_proxy = self._mp_manager.dict()
+        self.plot_metrics_proxy = self._mp_manager.dict()
+        # Initialize proxies
+        self.writer_metrics_proxy.update({"init": True})
+        self.plot_metrics_proxy.update({"init": True})
 
     @staticmethod
     def setup_channel_keys(ser_channel_key, **kwargs):
@@ -94,7 +101,8 @@ class SensorManager(DataManager, PlotManager, StorageManager):
                           dynamic_args_queue=self.dynamic_args_queue,
                           save_data=save_data,
                           filepath=filepath,
-                          virtual_ser_port=virtual_ser_port)
+                          virtual_ser_port=virtual_ser_port,
+                          metrics_proxy=self.writer_metrics_proxy)
 
         if self.os_flag == 'win':
             p = Thread(name='update',
@@ -111,7 +119,8 @@ class SensorManager(DataManager, PlotManager, StorageManager):
         """ Initialize dedicated process to update plot
         :return: pointer to process and plot object
         """
-        pm = PlotManager(static_args_dict=self.static_args_dict)
+        pm = PlotManager(static_args_dict=self.static_args_dict,
+                         metrics_proxy=self.plot_metrics_proxy,)
         if self.os_flag == 'win':
             p = Thread(name='plot',
                        target=pm.online_plot_data)
@@ -157,3 +166,10 @@ class SensorManager(DataManager, PlotManager, StorageManager):
             process.start()
         else:
             process.start()
+
+    def get_metrics(self) -> dict:
+        """Return a combined metrics snapshot."""
+        return {
+            "writer": dict(self.writer_metrics_proxy),
+            "plot": dict(self.plot_metrics_proxy),
+        }
