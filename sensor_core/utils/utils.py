@@ -77,7 +77,8 @@ def update_static_dict(static_args_dict: dict, **kwargs):
     valid_keys = ['ser_channel_key', 'plot_channel_key',
                   'commport', 'baudrate', 'shm_name',
                   'shape', 'dtype', 'EOL', 'ring_capacity',
-                  'num_points', 'num_channel']
+                  'num_points', 'num_channel', 'plot_target_fps',
+                  'plot_catchup_base_max', 'plot_catchup_boost']
     for key in kwargs:
         if key in valid_keys:
             static_args_dict[f"{key}"] = kwargs[f"{key}"]
@@ -103,6 +104,8 @@ def update_dynamic_dict(dynamic_args_dict: dict, **kwargs):
                     f"omitted from dictionary.")
     return dynamic_args_dict
 
+def _coerce(val, default):
+    return val if isinstance(val, (int, float)) and not isinstance(val, bool) else default
 
 class DictManager(object):
     def __init__(self, args_dict: dict = None, dict_type: str = None):
@@ -137,7 +140,8 @@ class DictManager(object):
         """
         essential_keys = ['ser_channel_key', "plot_channel_key", 'commport',
                           'baudrate', 'shm_name', 'shape', 'dtype', 'ring_capacity']
-        optional_keys = ['EOL', 'num_points', 'num_channel']
+        optional_keys = ['EOL', 'num_points', 'num_channel', 'plot_target_fps',
+                         'plot_catchup_base_max', 'plot_catchup_boost']
 
         for key in essential_keys:
             try:

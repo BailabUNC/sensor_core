@@ -3,7 +3,7 @@ from sensor_core.memory.ring_adapter import RingBuffer
 from sensor_core.memory.mem_utils import _assert_ring_layout
 import time
 from .plot_utils import *
-from sensor_core.utils.utils import DictManager
+from sensor_core.utils.utils import DictManager, _coerce
 from sensor_core.memory.strg_manager import StorageManager
 
 
@@ -26,6 +26,10 @@ class PlotManager(DictManager):
 
         self.select_dictionary(args_dict=static_args_dict, dict_type="static")
         self.unpack_selected_dict()
+        # Set consumer params
+        self.plot_target_fps = _coerce(getattr(self, "plot_target_fps", None), 60.0)
+        self.plot_catchup_base_max = int(_coerce(getattr(self, "plot_catchup_base_max", None), 2048))
+        self.plot_catchup_boost = _coerce(getattr(self, "plot_catchup_boost", None), 2.5)
 
         # Open ring (consumer)
         self.ring = RingBuffer(self.shm_name, int(self.ring_capacity),
@@ -82,6 +86,7 @@ class PlotManager(DictManager):
             self._meta[ch_key] = {"S": S, "D": D, "x0": x0, "z0": z0, "stage": stage}
 
     def online_plot_data(self, *_, **__):
+        tick_start = time.perf_counter()
         with timer(lambda ms: self.metrics.note_plot_tick(ms, write_idx=int(self.ring.write_idx))):
             try:
                 wi = int(self.ring.write_idx)
@@ -89,81 +94,108 @@ class PlotManager(DictManager):
                     return
                 self.metrics.last_write_idx = wi
 
-                # Assemble a rolling (C, S) from the last K frames
-                C, L = int(self.shape[0]), int(self.shape[1])
-                S    = int(self.num_points)
-                K    = int(np.ceil(S / max(1, L)))
-                lag  = int(getattr(self, "plot_lag_frames", 16))
+                C, L = int(self.shape[0]), int(self.shape[1])  # ring frame (C, L)
+                S = int(self.num_points)  # plotting window width
+                lag = int(getattr(self, "plot_lag_frames", 16))
 
-                start = wi - lag - K
+                target_fps = self.plot_target_fps
+                base_cap = int(self.plot_catchup_base_max)
+                boost = self.plot_catchup_boost
+
+                # Backlog since last tick
+                last_wi = getattr(self, "_last_seen_wi", wi)
+                delta = max(0, wi - last_wi)
+
+                # Writer rate estimate from last tick interval
+                last_tick_t = getattr(self, "_last_tick_t", None)
+                self._last_tick_t = tick_start
+                writer_fps_est = 0.0
+                if last_tick_t is not None:
+                    dt_tick = max(1e-6, tick_start - last_tick_t)
+                    writer_fps_est = delta / dt_tick
+
+                K_win = int(np.ceil(S / max(1, L)))
+                dynamic_cap = int(
+                    np.ceil((writer_fps_est / max(1e-6, target_fps)) * boost)
+                ) if writer_fps_est > 0 else base_cap
+                cap_limit = int(self.ring.capacity)
+                catchup_max = max(K_win, min(max(base_cap, dynamic_cap), cap_limit))
+
+                K_read = max(K_win, min(delta, catchup_max))
+                K_need = max(K_win, K_read)
+
+                start = wi - lag - K_need
                 if start < 0:
+                    self._last_seen_wi = wi
                     return
 
-                # Read K frames as a contiguous logical window (may need split)
-                cap  = int(self.ring.capacity)
+                cap = int(self.ring.capacity)
                 slot = start % cap
-                first = min(K, cap - slot)
-                win1  = self.ring.view_window(start, first)
-                rest  = K - first
+                first = min(K_need, cap - slot)
+                win1 = self.ring.view_window(start, first)  # (first, C, L)
+                rest = K_need - first
                 if rest:
                     win2 = self.ring.view_window(start + first, rest)
-                    win  = np.concatenate((win1, win2), axis=0)
+                    win = np.concatenate((win1, win2), axis=0)  # (K_need, C, L)
                 else:
-                    win  = win1
+                    win = win1
 
-                self.metrics.update_drop_estimate(write_idx_now=wi, frames_read_this_tick=K)
-
-                # Concatenate along time to (C, K*L) and take the last S samples
-                block  = np.concatenate([win[i] for i in range(win.shape[0])], axis=1)  # (C, K*L)
-                yblock = block[:, -S:]                                                  # (C, S)
-
-                # One owning, C-contiguous copy just before GPU upload
+                block = np.concatenate([win[i] for i in range(win.shape[0])], axis=1)  # (C, K_need*L)
+                yblock = block[:, -S:]  # (C, S)
                 yblock = np.require(yblock, dtype=np.float32, requirements=["C"])
                 if not yblock.flags["OWNDATA"]:
                     yblock = yblock.copy()
 
+                # Metrics: lag, consumption, drops estimate
                 self.metrics.last_read_idx = int(start)
                 self.metrics.frames_lag = int(wi - start)
+                self.metrics.update_drop_estimate(write_idx_now=wi, frames_read_this_tick=K_read)
 
-                # Update all subplots
+                # --- Upload to GPU once per line ---
                 ncols = int(np.shape(self.plot_channel_key)[1])
                 per_tick_gpu_ms = 0.0
                 for i, subplot in enumerate(self.fig):
-                    r, c   = divmod(i, ncols)
+                    r, c = divmod(i, ncols)
                     ch_key = self.plot_channel_key[r][c]
                     if ch_key not in self._lines:
                         continue
-                    line   = self._lines[ch_key]
-                    meta   = self._meta[ch_key]
+                    line = self._lines[ch_key]
+                    meta = self._meta[ch_key]
                     S_line, D = meta["S"], meta["D"]
-                    stage  = meta["stage"]
+                    stage = meta["stage"]
                     x0, z0 = meta["x0"], meta["z0"]
 
                     y = yblock[i]
                     if y.shape[0] != S_line:
-                        y = y[-S_line:] if y.shape[0] > S_line else np.pad(y, (S_line - y.shape[0], 0))
+                        if y.shape[0] > S_line:
+                            y = y[-S_line:]
+                        else:
+                            y = np.pad(y, (S_line - y.shape[0], 0))
 
                     stage[:, 0] = x0
                     stage[:, 1] = y
                     if D > 2 and z0 is not None:
                         stage[:, 2] = z0
 
-                    # Single contiguous upload to GPU buffer
-                    now = time.perf_counter()
-                    line.data[:S_line] = stage[:S_line]
-                    per_tick_gpu_ms += (time.perf_counter() - now) * 1000.0
-
-                    if self._metrics_proxy is not None and (now - self._last_push) > 0.5:
-                        self._metrics_proxy.update(self.metrics.snapshot())
-                        self._last_push = now
+                    t0 = time.perf_counter()
+                    line.data[:S_line] = stage[:S_line]  # GPU upload
+                    per_tick_gpu_ms += (time.perf_counter() - t0) * 1000.0
 
                 self.metrics.add_gpu_upload_ms(per_tick_gpu_ms)
+
+                # Bookkeeping & metrics proxy (rate-limited to ~2 Hz)
+                self._last_seen_wi = wi
+                now = time.perf_counter()
+                last_push = getattr(self, "_last_push", 0.0)
+                if self._metrics_proxy is not None and (now - last_push) > 0.5:
+                    self._metrics_proxy.update(self.metrics.snapshot())
+                    self._last_push = now
 
             except Exception as e:
                 import traceback, sys
                 print("[plot] exception:", e, file=sys.stderr)
                 traceback.print_exc()
-
+                return
 
     @staticmethod
     def offline_initialize_data(filepath: str, plot_channel_key: Union[np.ndarray, str]):
