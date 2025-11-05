@@ -19,32 +19,34 @@ def setup_process_start_method():
     return os_flag
 
 
-def create_static_dict(ser_channel_key: Union[np.ndarray, str], plot_channel_key: Union[np.ndarray, str],
-                       commport: str, baudrate: int, **kwargs):
-    """ Create dictionary for static parameters
-    :param ser_channel_key: array containing names for channels to be acquired from serial port
-    :param plot_channel_key: array containing names for grid plot in the correct shape
-    :param commport: string representing port to read data from
-    :param baudrate: rate of data transfer in bits/sec
-    :return: static_args_dict, dictionary containing all static parameters
-    """
-    valid_keys = ['ser_channel_key', 'plot_channel_key',
-                  'commport', 'baudrate', 'shm_name',
-                  'shape', 'dtype', 'EOL', 'ring_capacity',
-                  'num_points', 'num_channel']
-    static_args_dict = {
+def create_static_dict(
+    ser_channel_key,
+    plot_channel_key,
+    commport: str,
+    baudrate: int,
+    shm_name: str,
+    shape: Tuple[int, ...],
+    dtype=np.float32,
+    ring_capacity: int = 4096,
+    num_points: int = 1000,
+    *,
+    data_mode: str = "line",                 # <— NEW
+    frame_shape: Optional[Tuple[int, ...]] = None  # <— NEW (logical shape)
+) -> Dict:
+    """Build the static args dict that both processes read."""
+    return {
         "ser_channel_key": ser_channel_key,
         "plot_channel_key": plot_channel_key,
         "commport": commport,
-        "baudrate": baudrate
+        "baudrate": baudrate,
+        "shm_name": shm_name,
+        "shape": tuple(shape),
+        "dtype": dtype,
+        "ring_capacity": int(ring_capacity),
+        "num_points": int(num_points),
+        "data_mode": str(data_mode),
+        "frame_shape": tuple(frame_shape) if frame_shape else None,
     }
-    for key in kwargs:
-        if key in valid_keys:
-            static_args_dict[f"{key}"] = kwargs[f"{key}"]
-        else:
-            Warning(f"Key {key} is not an acceptable input in static_args_dict.\n"
-                    f"omitted from dictionary.")
-    return static_args_dict
 
 
 def create_dynamic_dict(num_points: int, window_size: int, **kwargs):
@@ -78,7 +80,8 @@ def update_static_dict(static_args_dict: dict, **kwargs):
                   'commport', 'baudrate', 'shm_name',
                   'shape', 'dtype', 'EOL', 'ring_capacity',
                   'num_points', 'num_channel', 'plot_target_fps',
-                  'plot_catchup_base_max', 'plot_catchup_boost']
+                  'plot_catch_up_max', 'plot_catchup_boost',
+                  'plot_lag_frames', 'data_mode']
     for key in kwargs:
         if key in valid_keys:
             static_args_dict[f"{key}"] = kwargs[f"{key}"]
@@ -139,7 +142,8 @@ class DictManager(object):
         :return: adds attributes to self for each key in dict
         """
         essential_keys = ['ser_channel_key', "plot_channel_key", 'commport',
-                          'baudrate', 'shm_name', 'shape', 'dtype', 'ring_capacity']
+                          'baudrate', 'shm_name', 'shape', 'dtype', 'ring_capacity',
+                          'data_mode']
         optional_keys = ['EOL', 'num_points', 'num_channel', 'plot_target_fps',
                          'plot_catchup_base_max', 'plot_catchup_boost']
 

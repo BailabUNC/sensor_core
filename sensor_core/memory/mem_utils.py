@@ -1,45 +1,57 @@
 import numpy as np
-from typing import Tuple
+from typing import Tuple, Optional
 try:
     from sensor_core.memory.ring_adapter import RingBuffer
 except Exception as e:
     RingBuffer = None  # will raise when used
 
-def initialize_ring(
-    ser_channel_key,
-    window_size: int,
-    frames_capacity: int = 4096,
-    dtype = np.float32,
-    shm_name: str = "/sensor_ring",
-    create: bool = True
-) -> Tuple["RingBuffer", Tuple[int, int]]:
-    """Create/open the shared-memory ring buffer.
-    :param ser_channel_key: list of serial channel names
-    :param window_size: for 1D data, number of time points to acquire before passing
-    :param frames_capacity: number of frames ring buffer can hold
-    :param dtype: data type (default 32-bit float)
-    :param shm_name: name of ring_buffer
-    :param create: flag to initialize (true) or reference (false) ring buffer
-    Returns (ring, frame_shape) where frame_shape == (C, S).
+def _normalize_image_shape(shape):
     """
-    if RingBuffer is None:
-        raise RuntimeError("RingBuffer adapter not available; build/install native 'fastring' first")
-
-    C = int(np.prod(np.shape(ser_channel_key)))
-    S = int(window_size)
-    frame_shape = (C, S)
-    dtype = np.float32
-    ring = RingBuffer(shm_name, frames_capacity, frame_shape, dtype=dtype, create=create)
-    return ring, frame_shape
-
-def _assert_ring_layout(ring, expected_shape, expected_dtype):
-    """ Safety lock for Ring Buffer
-    :param ring: ring buffer object
-    :param expected_shape: expected shape of ring buffer frame
-    :param expected_dtype: expected data type of ring buffer
+    Normalize image shape for C frames
+    :param shape: input image shape
     """
-    expected_bytes = np.dtype(expected_dtype).itemsize * int(np.prod(expected_shape))
-    assert int(ring.frame_bytes) == expected_bytes, (
-        f"frame_bytes mismatch: ring={ring.frame_bytes}, "
-        f"expected={expected_bytes} for shape={expected_shape}, dtype={expected_dtype}"
-    )
+    if len(shape) == 2:
+        H, W = shape
+        return (int(H), int(W), 1)
+    elif len(shape) == 3:
+        H, W, C = shape
+        return (int(H), int(W), int(C))
+    else:
+        raise ValueError(f"image frame_shape must be (H,W) or (H,W,C), got {shape}")
+
+def _assert_ring_layout(ring: RingBuffer, logical_shape: Tuple[int, ...], dtype) -> None:
+    """
+    Check to catch misconfiguration
+    :param ring: Ring buffer
+    :param logical_shape: input shape
+    :param dtype: data type of input
+    """
+    if ring.dtype != np.dtype(dtype):
+        raise TypeError(f"Ring dtype mismatch: ring={ring.dtype}, expected={np.dtype(dtype)}")
+    if ring.logical_shape != tuple(logical_shape):
+        raise ValueError(f"Ring logical shape mismatch: ring={ring.logical_shape}, expected={logical_shape}")
+
+def initialize_ring(ser_channel_key, window_size, dtype, shm_name="/sensor_ring",
+                    frames_capacity=4096, data_mode="line", frame_shape=None):
+    """
+    Initialize Ring Buffer
+    :param ser_channel_key: serial channel key names
+    :param window_size: number of fames per acquisition
+    :param dtype: data type
+    :param shm_name: name of ring buffer object
+    :param frames_capacity: max frame capacity of ring buffer
+    :param data_mode: allow for line or image data
+    :param frame_shape: input shape of each frame
+    """
+    data_mode = (data_mode or "line").lower()
+    if data_mode == "line":
+        C = len(ser_channel_key)
+        S = int(window_size)
+        logical = (C, S)
+    else:
+        if frame_shape is None:
+            raise ValueError("frame_shape is required for data_mode='image'")
+        logical = _normalize_image_shape(tuple(frame_shape))
+
+    ring = RingBuffer(shm_name, int(frames_capacity), tuple(logical), np.dtype(dtype), create=True)
+    return ring, logical

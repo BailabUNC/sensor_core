@@ -2,6 +2,7 @@ import serial
 import sys
 import glob
 import numpy as np
+from typing import *
 from itertools import product
 
 
@@ -35,22 +36,20 @@ def find_serial():
 
 
 class SerialManager:
-    def __init__(self, commport: str, baudrate: int, num_channel: int = 1,
-                 window_size: int = 1, EOL: str = None, virtual_ser_port: bool = False):
+    def __init__(self, commport: str, baudrate: int, frame_shape: Tuple[int, ...],
+                 EOL: str = None, virtual_ser_port: bool = False):
         """ Initialize SerialManager class - manages functions related to instantiating and using serial port
 
         :param commport: target serial port
         :param baudrate: target baudrate
-        :param num_channel: number of distinct channels
-        :param window_size: for 1D & 2D data, number of timepoints to acquire before passing
+        :param frame_shape: shape of output data (number of distinct channels, number of frames)
         :param EOL: optional; end of line phrase used to separate timepoints
         :param virtual_ser_port: boolean, if True will not initialize serial port, instead will rely on user-defined
         custom function to generate simulated data
         """
         self.commport = commport
         self.baudrate = baudrate
-        self.num_channel = num_channel
-        self.window_size = window_size
+        self.frame_shape = frame_shape
         self.EOL = EOL
         self.ser = None
         self.virtual_ser_port = virtual_ser_port
@@ -69,50 +68,62 @@ class SerialManager:
             except (OSError, serial.SerialException):
                 raise OSError("Error setting up serial port")
 
-    def _acquire_data(self):
-        """Handler function to acquire serial port data
-        Confirms validity of incoming data
-
-        :return: channel data [shape: (self.window_size, self.num_channel)]
-
-        """
-        ser_data = np.zeros((self.window_size, self.num_channel))
-        channel_data = np.array([])
-        # Decode incoming data into ser_data array
-        if self.EOL is None:
-            for i in product((range(self.window_size)), range(self.num_channel)):
-                try:
-                    ser_data[i] = self.ser.readline().decode().strip()
-                except ValueError:
-                    pass
+    def _acquire_data(self, frame_shape, data_mode):
+        """Default (fallback) reader; replace with real protocol."""
+        if data_mode == "line":
+            L = int(frame_shape[1])  # window_size
+            C = int(frame_shape[0])  # channels
+            return np.zeros((L, C), dtype=np.float32)
         else:
-            # TODO: EOL Handler
-            pass
-        # If any zeros
-        for i in range(self.window_size):
-            if any(ser_data[i, :] == 0):
-                pass
-            else:
-                channel_data = np.append(channel_data, ser_data[i][:])
-        return channel_data
+            H, W, Cimg = (frame_shape[0], frame_shape[1], frame_shape[2] if len(frame_shape) == 3 else 1)
+            return np.zeros((H, W, Cimg), dtype=np.float32)
 
-    def acquire_data(self, func=None):
-        """ Acquire serial port data
-        :param func: if None, defaults to using _acquire_data func. otherwise, use custom func to process ser data
-
-        :return: channel data [shape: (self.window_size, self.num_channel)]
+    def acquire_data(self, func=None, data_mode: str='line'):
+        """
+        Acquire serial data
+        :param func: custom acquisition function
+        :param data_mode: Line or Image data acquisition
+        Returns:
+          LINE mode:  (L, C) float32
+          IMAGE mode: (H, W, C) uint8/float32
         """
         if func is None:
-            channel_data = self._acquire_data()
+            channel_data = self._acquire_data(frame_shape=self.frame_shape,
+                                              data_mode=data_mode)  # your legacy path for line
         else:
             try:
-                channel_data = func(ser=self.ser, window_size=self.window_size, num_channel=self.num_channel)
-            except:
-                raise ValueError(f'custom function {func} must have the following variables as parameters:\n'
-                                 f'ser, window_size, num_channel')
+                # supply expected frame shape to custom func
+                expected = getattr(self, "shape", (self.window_size, self.num_channel))
+                channel_data = func(
+                    ser=self.ser,
+                    frame_shape=expected,
+                )
+            except Exception:
+                raise ValueError(
+                    f'custom function {func} must accept: ser, frame_shape'
+                )
 
-        channel_data = np.reshape(channel_data, (self.window_size, self.num_channel))
-        if channel_data.size > 0:
-            return channel_data
-        else:
-            return
+        if channel_data is None:
+            return None
+
+        arr = np.asarray(channel_data)
+
+        # Line mode
+        if data_mode == "line":
+            # normalize to (L, C)
+            if arr.ndim != 2:
+                raise ValueError(f"LINE mode expects 2D (L,C), got {arr.shape}")
+            L, C = arr.shape
+            if C != self.num_channel and L == self.num_channel:
+                arr = arr.T
+            if arr.shape != (self.window_size, self.num_channel):
+                raise ValueError(f"LINE data shape {arr.shape} != ({self.window_size}, {self.num_channel})")
+            return arr.astype(np.float32, copy=False)
+
+        # Image mode
+        if arr.ndim == 2:
+            arr = arr[:, :, None]
+        Hexp, Wexp, Cexp = self.frame_shape
+        if arr.shape != (Hexp, Wexp, Cexp):
+            raise ValueError(f"IMAGE data shape {arr.shape} != expected {(Hexp, Wexp, Cexp)}")
+        return arr
