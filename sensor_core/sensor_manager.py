@@ -13,7 +13,8 @@ import pathlib
 class SensorManager(DataManager, PlotManager, StorageManager):
     def __init__(self, ser_channel_key: Union[np.ndarray, str], commport: str,
                  baudrate: int = 115200, num_points: int = 1000, window_size: int = 1,
-                 dtype=np.float32, **kwargs):
+                 dtype=np.float32, data_mode: str = "line", frame_shape: tuple = None,
+                 **kwargs):
         """ Initialize SensorManager Class
         Initializes serial port, shared memory object, and kwarg dictionary (args_dict)
         :param serial_channel_key: list of serial channel names
@@ -31,16 +32,18 @@ class SensorManager(DataManager, PlotManager, StorageManager):
                                                       ser_channel_key=ser_channel_key,
                                                       **kwargs)
         # Setup ring buffer
-        self.ring, frame_shape = initialize_ring(ser_channel_key=ser_channel_key,
+        self.ring, logical_shape = initialize_ring(ser_channel_key=ser_channel_key,
                                             window_size=window_size,
-                                            dtype=np.float32)
+                                            dtype=dtype,
+                                            data_mode=data_mode,
+                                            frame_shape=frame_shape)
         # Setup target consumer params and enforce
         plot_target_fps = kwargs.get("plot_target_fps", 60.0)  # aim for ~60 Hz visualization
-        plot_catchup_base_max = kwargs.get("plot_catchup_base_max", 2048)  # baseline cap per tick
+        plot_catch_up_max = kwargs.get("plot_catchup_base_max", 2048)  # baseline cap per tick
         plot_catchup_boost = kwargs.get("plot_catchup_boost", 2.5)  # multiplier on dynamic cap
 
         plot_target_fps = _coerce(plot_target_fps, 60.0)
-        plot_catchup_base_max = int(_coerce(plot_catchup_base_max, 2048))
+        plot_catch_up_max = int(_coerce(plot_catch_up_max, 2048))
         plot_catchup_boost = _coerce(plot_catchup_boost, 2.5)
         # Setup static args dict
         self.static_args_dict = create_static_dict(ser_channel_key=self.ser_channel_key,
@@ -48,12 +51,16 @@ class SensorManager(DataManager, PlotManager, StorageManager):
                                                    commport=commport,
                                                    baudrate=baudrate,
                                                    shm_name='/sensor_ring',
-                                                   shape=frame_shape,
+                                                   shape=logical_shape,
                                                    dtype=dtype,
                                                    ring_capacity=4096,
                                                    num_points=num_points,
+                                                   data_mode=data_mode,
+                                                   frame_shape=logical_shape
+                                                   )
+        self.static_args_dict = update_static_dict(static_args_dict=self.static_args_dict,
                                                    plot_target_fps=plot_target_fps,
-                                                   plot_catchup_base_max=plot_catchup_base_max,
+                                                   plot_catch_up_max=plot_catch_up_max,
                                                    plot_catchup_boost=plot_catchup_boost
                                                    )
         # Setup dynamic args dict + queue

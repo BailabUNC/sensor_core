@@ -37,8 +37,10 @@ class DataManager(SerialManager, DictManager, StorageManager):
 
         self.unpack_selected_dict()
 
+        # Initialize Buffer
         self.ring = RingBuffer(self.shm_name, int(self.ring_capacity), tuple(self.shape), self.dtype, create=False)
         _assert_ring_layout(self.ring, tuple(self.shape), self.dtype)
+
         # Unpack dynamic_args_dict if it exists
         try:
             self.dynamic_args_dict = self.dynamic_args_queue.get()
@@ -65,41 +67,48 @@ class DataManager(SerialManager, DictManager, StorageManager):
         """
         SerialManager.__init__(self, commport=self.commport,
                                baudrate=self.baudrate,
-                               num_channel=self.num_channel,
-                               window_size=self.window_size,
+                               frame_shape=self.shape,
                                EOL=self.EOL,
                                virtual_ser_port=virtual_ser_port)
         self.setup_serial()
 
     def online_update_data(self, func=None):
         last_push = perf_counter()
+        last_log = time.time()
         while True:
             try:
-                with timer(lambda ms: self.metrics.add_acquire_ms(ms)):  # reusing bucket if you like; or add another
-                    ys = self.acquire_data(func=func)
+                with timer(lambda ms: self.metrics.add_acquire_ms(ms)):
+                    ys = self.acquire_data(func=func,
+                                           data_mode=self.data_mode)
                 if ys is None:
-                    print("[writer] acquire_data -> None")
+                    if time.time() - last_log > 1.0:
+                        print("[writer] acquire_data -> None")
+                        last_log = time.time()
                     continue
 
-                arr = np.asarray(ys)
-                if arr.ndim != 2:
-                    raise ValueError(f"[writer] ys ndim={arr.ndim}, expected 2 (L,C), got {arr.shape}")
+                if self.data_mode=='line':
+                    arr = np.asarray(ys)
+                    if arr.ndim != 2:
+                        raise ValueError(f"[writer] ys ndim={arr.ndim}, expected 2 (L,C), got {arr.shape}")
 
-                L_in, C_in = arr.shape
-                C_ring, L_ring = self.shape  # ring frame is (C, L)
+                    L_in, C_in = arr.shape
+                    C_ring, L_ring = self.shape  # ring frame is (C, L)
 
-                if C_in != C_ring:
-                    raise ValueError(f"[writer] channels mismatch: ys (L,{C_in}), ring expects C={C_ring}")
+                    if C_in != C_ring:
+                        raise ValueError(f"[writer] channels mismatch: ys (L,{C_in}), ring expects C={C_ring}")
 
-                # Clamp to ring L
-                L = min(L_in, L_ring)
-                if L != L_ring:
-                    arr = arr[:L, :]
+                    # Clamp to ring L
+                    L = min(L_in, L_ring)
+                    if L != L_ring:
+                        arr = arr[:L, :]
 
-                # Confirm frame is contiguous and transpose, then publish to ring
-                frame = np.ascontiguousarray(arr.T, dtype=np.float32)
-                with timer(lambda ms: self.metrics.note_publish(ms, write_idx=int(self.ring.write_idx))):
-                    self.ring.publish(frame)
+                    # Confirm frame is contiguous and transpose, then publish to ring
+                    frame = np.ascontiguousarray(arr.T, dtype=self.dtype)
+                    with timer(lambda ms: self.metrics.note_publish(ms, write_idx=int(self.ring.write_idx))):
+                        self.ring.publish(frame)
+                else:
+                    with timer(lambda ms: self.metrics.note_publish(ms)):
+                        self.ring.publish(np.asarray(ys, dtype=self.dtype))
 
                 wi = int(self.ring.write_idx)
                 self.metrics.last_write_idx = wi
@@ -112,6 +121,6 @@ class DataManager(SerialManager, DictManager, StorageManager):
             except Exception as e:
                 print("[writer] EXCEPTION:", repr(e))
                 traceback.print_exc()
-                time.sleep(0.05)
+                time.sleep(0.02)
 
 

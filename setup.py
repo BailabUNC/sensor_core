@@ -13,7 +13,7 @@ install_requires = [
 
 ext_modules = [
     Pybind11Extension(
-        "fastring",  # <-- top-level module name users will `import`
+        "fastring",
         sources=[
             "sensor_core/native/fastring/py_module.cpp",
         ],

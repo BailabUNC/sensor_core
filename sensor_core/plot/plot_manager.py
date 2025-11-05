@@ -5,6 +5,7 @@ import time
 from .plot_utils import *
 from sensor_core.utils.utils import DictManager, _coerce
 from sensor_core.memory.strg_manager import StorageManager
+from typing import Union
 
 
 def run_once(f):
@@ -42,25 +43,43 @@ class PlotManager(DictManager):
         self.initialize_fig()
 
         # Initialize staging once
-        self._init_ring_plotting()
+        if self.data_mode == 'line':
+            self._init_ring_plotting_line()
+        else:
+            self._init_ring_plotting_image()
+
+        self._metrics_proxy = metrics_proxy
+        self._last_push = 0.0
+        self._last_read_idx = None
 
         # Register animation once (you had this twice)
         self.fig.add_animations(self.online_plot_data)
 
-        self._metrics_proxy = metrics_proxy
-        self._last_push = 0.0
-
     def initialize_fig(self):
-        fig = create_fig(plot_channel_key=self.plot_channel_key)
-        ys = initialize_fig_data(num_channel=self.num_channel, num_points=self.num_points)
-        for i, subplot in enumerate(fig):
-            idx = divmod(i, np.shape(self.plot_channel_key)[1])
-            plot_data = ys[i]
-            subplot.add_line(data=plot_data, name=self.plot_channel_key[idx[0]][idx[1]], cmap='jet')
-        self.fig = fig
-        return fig
+        if self.data_mode == "line":
+            fig = create_fig(plot_channel_key=self.plot_channel_key)
+            ys = initialize_fig_data(num_channel=self.num_channel, num_points=self.num_points)
+            for i, subplot in enumerate(fig):
+                idx = divmod(i, np.shape(self.plot_channel_key)[1])
+                plot_data = ys[i]
+                subplot.add_line(data=plot_data, name=self.plot_channel_key[idx[0]][idx[1]], cmap='jet')
+            self.fig = fig
+        else:
+            fig = create_fig(plot_channel_key=self.plot_channel_key)  # 1x1 layout
+            H, W, Cimg = (self.shape[0], self.shape[1], self.shape[2] if len(self.shape) == 3 else 1)
+            if Cimg == 1:
+                imbuf = np.zeros((H, W), dtype=self.dtype)
+            else:
+                imbuf = np.zeros((H, W, Cimg), dtype=self.dtype)
 
-    def _init_ring_plotting(self):
+            for i, subplot in enumerate(fig):
+                im = subplot.add_image(data=imbuf, name="image", cmap="gray")
+                im.vmax=255
+                im.vmin=0
+            self.fig = fig
+        return self.fig
+
+    def _init_ring_plotting_line(self):
         self._lines = {}
         self._meta  = {}
         ncols = int(np.shape(self.plot_channel_key)[1])
@@ -74,7 +93,7 @@ class PlotManager(DictManager):
             if line is None:
                 continue
             self._lines[ch_key] = line
-            pos0 = line.data.value
+            pos0 = line.data.value  # (S,D)
             S, D = pos0.shape
             stage = np.empty((S, D), dtype=np.float32)
             x0 = pos0[:, 0].astype(np.float32, copy=True)
@@ -85,7 +104,24 @@ class PlotManager(DictManager):
                 stage[:, 2] = z0
             self._meta[ch_key] = {"S": S, "D": D, "x0": x0, "z0": z0, "stage": stage}
 
+    def _init_ring_plotting_image(self):
+        # store handle to the image graphic
+        self._image = None
+        for i, subplot in enumerate(self.fig):
+            if hasattr(subplot, "graphics") and subplot.graphics:
+                for g in subplot.graphics:
+                    if getattr(g, "kind", "").lower() == "image" or g.__class__.__name__.lower().startswith("image"):
+                        self._image = g
+                if self._image is None:
+                    self._image = subplot.graphics[-1]
+
     def online_plot_data(self, *_, **__):
+        target_fps = float(getattr(self, "plot_target_fps", 60.0))
+        min_dt = 1.0/max(1e-6, target_fps)
+        now = time.perf_counter()
+        last = getattr(self, "_last_present", 0.0)
+        if now - last < min_dt:
+            return
         tick_start = time.perf_counter()
         with timer(lambda ms: self.metrics.note_plot_tick(ms, write_idx=int(self.ring.write_idx))):
             try:
@@ -94,94 +130,110 @@ class PlotManager(DictManager):
                     return
                 self.metrics.last_write_idx = wi
 
-                C, L = int(self.shape[0]), int(self.shape[1])  # ring frame (C, L)
-                S = int(self.num_points)  # plotting window width
                 lag = int(getattr(self, "plot_lag_frames", 16))
-
-                target_fps = self.plot_target_fps
-                base_cap = int(self.plot_catchup_base_max)
-                boost = self.plot_catchup_boost
-
-                # Backlog since last tick
-                last_wi = getattr(self, "_last_seen_wi", wi)
-                delta = max(0, wi - last_wi)
-
-                # Writer rate estimate from last tick interval
-                last_tick_t = getattr(self, "_last_tick_t", None)
-                self._last_tick_t = tick_start
-                writer_fps_est = 0.0
-                if last_tick_t is not None:
-                    dt_tick = max(1e-6, tick_start - last_tick_t)
-                    writer_fps_est = delta / dt_tick
-
-                K_win = int(np.ceil(S / max(1, L)))
-                dynamic_cap = int(
-                    np.ceil((writer_fps_est / max(1e-6, target_fps)) * boost)
-                ) if writer_fps_est > 0 else base_cap
-                cap_limit = int(self.ring.capacity)
-                catchup_max = max(K_win, min(max(base_cap, dynamic_cap), cap_limit))
-
-                K_read = max(K_win, min(delta, catchup_max))
-                K_need = max(K_win, K_read)
-
-                start = wi - lag - K_need
-                if start < 0:
-                    self._last_seen_wi = wi
+                cap = int(self.ring.capacity)
+                end = wi - lag
+                if end < 0:
                     return
 
-                cap = int(self.ring.capacity)
-                slot = start % cap
-                first = min(K_need, cap - slot)
-                win1 = self.ring.view_window(start, first)  # (first, C, L)
-                rest = K_need - first
-                if rest:
-                    win2 = self.ring.view_window(start + first, rest)
-                    win = np.concatenate((win1, win2), axis=0)  # (K_need, C, L)
+                if self.data_mode == "line":
+                    C, L = int(self.shape[0]), int(self.shape[1])
+                    S = int(self.num_points)
+                    K = int(np.ceil(S / max(1, L)))
+                    start = end - K + 1
+                    if start < 0:
+                        return
+
+                    slot = start % cap
+                    first = min(K, cap - slot)
+                    win1 = self.ring.view_window(start, first)
+                    rest = K - first
+                    if rest:
+                        win2 = self.ring.view_window(start + first, rest)
+                        win = np.concatenate((win1, win2), axis=0)
+                    else:
+                        win = win1
+
+                    self.metrics.update_drop_estimate(write_idx_now=wi, frames_read_this_tick=K)
+
+                    block = np.concatenate([win[i] for i in range(win.shape[0])], axis=1)  # (C, K*L)
+                    yblock = block[:, -S:]
+                    yblock = np.require(yblock, dtype=np.float32, requirements=["C"])
+                    if not yblock.flags["OWNDATA"]:
+                        yblock = yblock.copy()
+
+                    ncols = int(np.shape(self.plot_channel_key)[1])
+                    per_tick_gpu_ms = 0.0
+                    for i, subplot in enumerate(self.fig):
+                        r, c = divmod(i, ncols)
+                        ch_key = self.plot_channel_key[r][c]
+                        if ch_key not in self._lines:
+                            continue
+                        line = self._lines[ch_key]
+                        meta = self._meta[ch_key]
+                        S_line, D = meta["S"], meta["D"]
+                        stage = meta["stage"]
+                        x0, z0 = meta["x0"], meta["z0"]
+
+                        y = yblock[i]
+                        if y.shape[0] != S_line:
+                            y = y[-S_line:] if y.shape[0] > S_line else np.pad(y, (S_line - y.shape[0], 0))
+                        stage[:, 0] = x0
+                        stage[:, 1] = y
+                        if D > 2 and z0 is not None:
+                            stage[:, 2] = z0
+
+                        t0 = time.perf_counter()
+                        line.data[:S_line] = stage[:S_line]
+                        per_tick_gpu_ms += (time.perf_counter() - t0) * 1000.0
+
+                    self.metrics.add_gpu_upload_ms(per_tick_gpu_ms)
+                    self.metrics.last_read_idx = int(start)
+                    self.metrics.frames_lag = int(wi - start)
+
                 else:
-                    win = win1
+                    CATCH_MAX = int(getattr(self, "plot_catch_up_max", 8))
 
-                block = np.concatenate([win[i] for i in range(win.shape[0])], axis=1)  # (C, K_need*L)
-                yblock = block[:, -S:]  # (C, S)
-                yblock = np.require(yblock, dtype=np.float32, requirements=["C"])
-                if not yblock.flags["OWNDATA"]:
-                    yblock = yblock.copy()
+                    if self._last_read_idx is None:
+                        frames_to_read = 1
+                        start = end
+                    else:
+                        available = max(0, end - self._last_read_idx)
+                        frames_to_read = min(available, CATCH_MAX) if available > 0 else 0
+                        start = end - frames_to_read + 1 if frames_to_read > 0 else None
 
-                # Metrics: lag, consumption, drops estimate
-                self.metrics.last_read_idx = int(start)
-                self.metrics.frames_lag = int(wi - start)
-                self.metrics.update_drop_estimate(write_idx_now=wi, frames_read_this_tick=K_read)
+                    if not frames_to_read:
+                        self._last_present = time.perf_counter()
+                        return
 
-                # --- Upload to GPU once per line ---
-                ncols = int(np.shape(self.plot_channel_key)[1])
-                per_tick_gpu_ms = 0.0
-                for i, subplot in enumerate(self.fig):
-                    r, c = divmod(i, ncols)
-                    ch_key = self.plot_channel_key[r][c]
-                    if ch_key not in self._lines:
-                        continue
-                    line = self._lines[ch_key]
-                    meta = self._meta[ch_key]
-                    S_line, D = meta["S"], meta["D"]
-                    stage = meta["stage"]
-                    x0, z0 = meta["x0"], meta["z0"]
+                    # handle wrap case
+                    slot = start % cap
+                    first = min(frames_to_read, cap - slot)
+                    win1 = self.ring.view_window(start, first)
+                    rest = frames_to_read - first
+                    if rest:
+                        win2 = self.ring.view_window(start + first, rest)
+                        win = np.concatenate((win1, win2), axis=0)
+                    else:
+                        win = win1
 
-                    y = yblock[i]
-                    if y.shape[0] != S_line:
-                        if y.shape[0] > S_line:
-                            y = y[-S_line:]
-                        else:
-                            y = np.pad(y, (S_line - y.shape[0], 0))
+                    self.metrics.update_drop_estimate(write_idx_now=wi, frames_read_this_tick=frames_to_read)
+                    latest = win[-1]
 
-                    stage[:, 0] = x0
-                    stage[:, 1] = y
-                    if D > 2 and z0 is not None:
-                        stage[:, 2] = z0
+                    if latest.ndim == 3 and latest.shape[2] == 1:
+                        latest = latest[:, :, 0]
+                    latest = np.require(latest, dtype=np.float32, requirements=["C"])
+                    if not latest.flags["OWNDATA"]:
+                        latest = latest.copy()
 
+                    # upload to the single image graphic
                     t0 = time.perf_counter()
-                    line.data[:S_line] = stage[:S_line]  # GPU upload
-                    per_tick_gpu_ms += (time.perf_counter() - t0) * 1000.0
+                    self._image.data[...] = latest
+                    self.metrics.add_gpu_upload_ms((time.perf_counter() - t0) * 1000.0)
 
-                self.metrics.add_gpu_upload_ms(per_tick_gpu_ms)
+                    self._last_read_idx = end
+                    self.metrics.last_read_idx = int(end)
+                    self.metrics.frames_lag = int(wi - end)
 
                 # Bookkeeping & metrics proxy (rate-limited to ~2 Hz)
                 self._last_seen_wi = wi
