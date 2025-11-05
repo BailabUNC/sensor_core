@@ -7,3 +7,5 @@ imageio
 sqlitedict
 pyserial
 h5py
+Cython
+numba

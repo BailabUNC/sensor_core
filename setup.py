@@ -1,7 +1,7 @@
 from setuptools import setup, find_packages
 
 install_requires = [
-    'numpy',
+    'numpy >= 2.0',
     'pygfx>=0.1.13',
     'jupyterlab',
     'pyserial',

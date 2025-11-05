@@ -1,0 +1,6 @@
+numpy
+pygfx>=0.1.13
+jupyterlab
+pyserial
+fastplotlib
+h5py
