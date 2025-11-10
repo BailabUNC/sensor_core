@@ -2,6 +2,9 @@ import numpy as np
 import fastring
 from typing import Tuple, Optional
 
+from numba.cuda.cudadecl import Cuda_imul
+
+
 class RingBuffer:
     """
     Python adapter for C++ fastring class
@@ -14,7 +17,6 @@ class RingBuffer:
         self.logical_shape = tuple(frame_shape)
         self.dtype = np.dtype(dtype)
 
-        # Infer mode and flatten geometry used by the C layer for line and image case
         if len(self.logical_shape) == 2:
             self._mode = "line"
             C, S = self.logical_shape
@@ -118,3 +120,11 @@ class RingBuffer:
         except BufferError:
             arr = np.frombuffer(mv.tobytes(), dtype=self.dtype, count=elem_count)
             return arr.reshape(frames, H, W, Cimg)
+
+    def view_window_bytes(self, start: int, frames: int):
+        if frames <= 0:
+            return memoryview(b"")
+        if self._mode == 'line':
+            return self._ring.view_window(int(start), int(frames), int(self._C), int(self._S))
+        else:
+            return self._ring.view_window(int(start), int(frames), int(self._H), int(self._W * self._Cimg))
