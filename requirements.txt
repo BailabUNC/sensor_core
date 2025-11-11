@@ -7,3 +7,6 @@ imageio
 sqlitedict
 pyserial
 h5py
+cython
+numba
+matplotlib
