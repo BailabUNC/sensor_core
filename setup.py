@@ -26,6 +26,13 @@ ext_modules = [
         extra_compile_args=["-O3", "-fvisibility=hidden", "-fPIC"],
     ),
 ]
+    'numpy >= 2.0',
+    'pygfx>=0.1.13',
+    'jupyterlab',
+    'pyserial',
+    'fastplotlib',
+    'h5py',
+    ]
 
 setup(
     name="sensor_core",

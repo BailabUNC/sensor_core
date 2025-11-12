@@ -1,0 +1,18 @@
+Metadata-Version: 2.4
+Name: MABOS_core
+Version: 1.0
+Summary: Core API for plotting sensor data in real-time
+Home-page: 
+Author: Arjun Putcha
+Author-email: 
+License-File: LICENSE
+Requires-Dist: numpy
+Requires-Dist: pygfx>=0.1.13
+Requires-Dist: jupyterlab
+Requires-Dist: pyserial
+Requires-Dist: fastplotlib
+Requires-Dist: h5py
+Dynamic: author
+Dynamic: license-file
+Dynamic: requires-dist
+Dynamic: summary

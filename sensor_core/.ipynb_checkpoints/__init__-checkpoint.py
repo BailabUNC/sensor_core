@@ -3,13 +3,11 @@ from .data import *
 from .memory import *
 from .plot import *
 from .serial import *
-from .dsp import *
 
 __all__ = [
     "SensorManager",
     "data",
     "memory",
     "plot",
-    "serial",
-    "dsp"
+    "serial"
 ]
