@@ -25,14 +25,20 @@ ext_modules = [
         define_macros=[("PYBIND11_DETAILED_ERROR_MESSAGES", "1")],
         extra_compile_args=["-O3", "-fvisibility=hidden", "-fPIC"],
     ),
+    Pybind11Extension(
+        "sensor_core.native.dsp.dsp",
+        sources=[
+            "sensor_core/native/dsp/py_module.cpp",
+            "sensor_core/native/dsp/moving_average.c",
+        ],
+        include_dirs=[
+            "sensor_core/native/dsp",
+            np.get_include(),
+        ],
+        cxx_std=17,
+        extra_compile_args=["-O3", "-fvisibility=hidden", "-fPIC"],
+    ),
 ]
-    'numpy >= 2.0',
-    'pygfx>=0.1.13',
-    'jupyterlab',
-    'pyserial',
-    'fastplotlib',
-    'h5py',
-    ]
 
 setup(
     name="sensor_core",
