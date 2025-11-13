@@ -32,6 +32,29 @@ struct ShmRing {
     RingHeader* hdr = nullptr;
     uint8_t* data = nullptr;
 
+    ShmRing() = default;
+
+    ShmRing(const ShmRing&) = delete;
+    ShmRing& operator=(const ShmRing&) = delete;
+
+    // Move constructor
+    ShmRing(ShmRing&& other) noexcept {
+        move_from(std::move(other));
+    }
+
+    // Move assignment
+    ShmRing& operator=(ShmRing&& other) noexcept {
+        if (this != &other) {
+            cleanup();
+            move_from(std::move(other));
+        }
+        return *this;
+    }
+
+    ~ShmRing() {
+        cleanup();
+    }
+
     static ShmRing create(const char* name, size_t capacity, size_t frame_bytes) {
         ShmRing r;
         r.capacity = capacity;
@@ -65,7 +88,6 @@ struct ShmRing {
 
         r.hMap = hMap;
         r.base = static_cast<uint8_t*>(p);
-
 #else
         int fd = shm_open(name, O_CREAT | O_RDWR, 0600);
         if (fd < 0)
@@ -86,10 +108,10 @@ struct ShmRing {
         r.base = static_cast<uint8_t*>(p);
 #endif
 
-        r.hdr = reinterpret_cast<RingHeader*>(r.base);
+        r.hdr  = reinterpret_cast<RingHeader*>(r.base);
         r.data = r.base + sizeof(RingHeader);
         r.hdr->write_idx.store(0, std::memory_order_relaxed);
-        r.hdr->capacity = capacity;
+        r.hdr->capacity    = capacity;
         r.hdr->frame_bytes = frame_bytes;
         return r;
     }
@@ -122,7 +144,6 @@ struct ShmRing {
 
         r.hMap = hMap;
         r.base = static_cast<uint8_t*>(p);
-
 #else
         int fd = shm_open(name, O_RDWR, 0600);
         if (fd < 0)
@@ -138,9 +159,9 @@ struct ShmRing {
         r.base = static_cast<uint8_t*>(p);
 #endif
 
-        r.hdr = reinterpret_cast<RingHeader*>(r.base);
+        r.hdr  = reinterpret_cast<RingHeader*>(r.base);
         r.data = r.base + sizeof(RingHeader);
-        return r;
+        return r; 
     }
 
     void publish(const void* frames, size_t nframes) {
@@ -155,7 +176,8 @@ struct ShmRing {
         hdr->write_idx.store(idx + nframes, std::memory_order_release);
     }
 
-    ~ShmRing() {
+private:
+    void cleanup() {
 #ifdef _WIN32
         if (base) {
             UnmapViewOfFile(base);
@@ -163,6 +185,7 @@ struct ShmRing {
         if (hMap) {
             CloseHandle(hMap);
         }
+        hMap = NULL;
 #else
         if (base && total_bytes > 0) {
             munmap(base, total_bytes);
@@ -170,6 +193,36 @@ struct ShmRing {
         if (fd >= 0) {
             close(fd);
         }
+        fd = -1;
 #endif
+        base = nullptr;
+        hdr = nullptr;
+        data = nullptr;
+        capacity = 0;
+        frame_bytes = 0;
+        total_bytes = 0;
+    }
+
+    void move_from(ShmRing&& other) noexcept {
+#ifdef _WIN32
+        hMap = other.hMap;
+        other.hMap = NULL;
+#else
+        fd = other.fd;
+        other.fd = -1;
+#endif
+        capacity    = other.capacity;
+        frame_bytes = other.frame_bytes;
+        total_bytes = other.total_bytes;
+        base        = other.base;
+        hdr         = other.hdr;
+        data        = other.data;
+
+        other.capacity = 0;
+        other.frame_bytes = 0;
+        other.total_bytes = 0;
+        other.base = nullptr;
+        other.hdr  = nullptr;
+        other.data = nullptr;
     }
 };

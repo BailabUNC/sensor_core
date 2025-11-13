@@ -13,7 +13,7 @@ install_requires = [
 ]
 
 if sys.platform == "win32":
-    extra_compile_args = ["/O2"]          # MSVC optimization flag
+    extra_compile_args = ["/O2"]
 else:
     extra_compile_args = ["-O3", "-fvisibility=hidden", "-fPIC"]
 
