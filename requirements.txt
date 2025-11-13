@@ -7,3 +7,4 @@ imageio
 sqlitedict
 pyserial
 h5py
+pybind11
