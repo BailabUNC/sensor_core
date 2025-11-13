@@ -1,6 +1,7 @@
 from setuptools import setup, find_packages
 from pybind11.setup_helpers import Pybind11Extension, build_ext
 import numpy as np
+import sys
 
 install_requires = [
     "numpy",
@@ -10,6 +11,11 @@ install_requires = [
     "fastplotlib",
     "h5py",
 ]
+
+if sys.platform == "win32":
+    extra_compile_args = ["/O2"]
+else:
+    extra_compile_args = ["-O3", "-fvisibility=hidden", "-fPIC"]
 
 ext_modules = [
     Pybind11Extension(
@@ -23,7 +29,7 @@ ext_modules = [
         ],
         cxx_std=17,
         define_macros=[("PYBIND11_DETAILED_ERROR_MESSAGES", "1")],
-        extra_compile_args=["-O3", "-fvisibility=hidden", "-fPIC"],
+        extra_compile_args=extra_compile_args,
     ),
 ]
 
