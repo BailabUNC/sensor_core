@@ -16,7 +16,6 @@ def run_once(f):
     wrapper.has_run = False
     return wrapper
 
-
 class PlotManager(DictManager):
     def __init__(self, static_args_dict, metrics_proxy=None):
         """ Initialize Plot Manager Class
@@ -34,7 +33,7 @@ class PlotManager(DictManager):
 
         # Open ring (consumer)
         self.ring = RingBuffer(self.shm_name, int(self.ring_capacity),
-                               tuple(self.shape), self.dtype, create=False)
+                               tuple(self.shape), self.data_mode, self.dtype, create=False)
         _assert_ring_layout(self.ring, tuple(self.shape), self.dtype)
 
         self.metrics = RingMetrics()
@@ -101,7 +100,10 @@ class PlotManager(DictManager):
             stage[:, 0] = x0
             stage[:, 1] = pos0[:, 1]
             if D > 2:
+                z0 = pos0[:, 2].astype(np.float32, copy=True)
                 stage[:, 2] = z0
+            else:
+                z0 = None
             self._meta[ch_key] = {"S": S, "D": D, "x0": x0, "z0": z0, "stage": stage}
 
     def _init_ring_plotting_image(self):
@@ -137,7 +139,7 @@ class PlotManager(DictManager):
                     return
 
                 if self.data_mode == "line":
-                    C, L = int(self.shape[0]), int(self.shape[1])
+                    C, L = int(self.shape[0]), int(self.shape[2])
                     S = int(self.num_points)
                     K = int(np.ceil(S / max(1, L)))
                     start = end - K + 1

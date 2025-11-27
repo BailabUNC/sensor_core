@@ -38,7 +38,8 @@ class DataManager(SerialManager, DictManager, StorageManager):
         self.unpack_selected_dict()
 
         # Initialize Buffer
-        self.ring = RingBuffer(self.shm_name, int(self.ring_capacity), tuple(self.shape), self.dtype, create=False)
+        self.ring = RingBuffer(self.shm_name, int(self.ring_capacity), 
+                               tuple(self.shape), self.data_mode,self.dtype,create=False)
         _assert_ring_layout(self.ring, tuple(self.shape), self.dtype)
 
         # Unpack dynamic_args_dict if it exists
@@ -92,7 +93,7 @@ class DataManager(SerialManager, DictManager, StorageManager):
                         raise ValueError(f"[writer] ys ndim={arr.ndim}, expected 2 (L,C), got {arr.shape}")
 
                     L_in, C_in = arr.shape
-                    C_ring, L_ring = self.shape  # ring frame is (C, L)
+                    C_ring, _, L_ring, = self.frame_shape  # ring frame is (C, P, L)
 
                     if C_in != C_ring:
                         raise ValueError(f"[writer] channels mismatch: ys (L,{C_in}), ring expects C={C_ring}")

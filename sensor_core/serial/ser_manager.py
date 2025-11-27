@@ -71,7 +71,7 @@ class SerialManager:
     def _acquire_data(self, frame_shape, data_mode):
         """Default (fallback) reader; replace with real protocol."""
         if data_mode == "line":
-            L = int(frame_shape[1])  # window_size
+            L = int(frame_shape[2])  # window_size
             C = int(frame_shape[0])  # channels
             return np.zeros((L, C), dtype=np.float32)
         else:
@@ -93,7 +93,7 @@ class SerialManager:
         else:
             try:
                 # supply expected frame shape to custom func
-                expected = getattr(self, "shape", (self.window_size, self.num_channel))
+                expected = getattr(self, "frame_shape", (self.window_size, self.num_channel))
                 channel_data = func(
                     ser=self.ser,
                     frame_shape=expected,
@@ -119,11 +119,10 @@ class SerialManager:
             if arr.shape != (self.window_size, self.num_channel):
                 raise ValueError(f"LINE data shape {arr.shape} != ({self.window_size}, {self.num_channel})")
             return arr.astype(np.float32, copy=False)
-
-        # Image mode
-        if arr.ndim == 2:
-            arr = arr[:, :, None]
-        Hexp, Wexp, Cexp = self.frame_shape
-        if arr.shape != (Hexp, Wexp, Cexp):
-            raise ValueError(f"IMAGE data shape {arr.shape} != expected {(Hexp, Wexp, Cexp)}")
-        return arr
+        else: # Image mode
+            if arr.ndim == 2:
+                arr = arr[:, :, None]
+            Hexp, Wexp, Cexp = self.frame_shape
+            if arr.shape != (Hexp, Wexp, Cexp):
+                raise ValueError(f"IMAGE data shape {arr.shape} != expected {(Hexp, Wexp, Cexp)}")
+            return arr

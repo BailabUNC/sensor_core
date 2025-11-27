@@ -15,8 +15,6 @@ class SensorManager(DataManager, PlotManager, StorageManager):
     def __init__(self, ser_channel_key: Union[np.ndarray, str],
                  commport: str,
                  baudrate: int = 115200,
-                 num_points: int = 1000,
-                 window_size: int = 1,
                  dtype=np.float32,
                  data_mode: str = "line",
                  frame_shape: tuple = None,
@@ -36,8 +34,6 @@ class SensorManager(DataManager, PlotManager, StorageManager):
         :param window_size: for 1D data, number of time points to acquire before passing
         :param dtype: data type to store in shared memory object
         """
-        #TODO: Num points and window size should be incorporated into frame shape. Maybe add frame_shape validator
-
         self.dtype = dtype
         self.data_mode = data_mode
 
@@ -50,10 +46,10 @@ class SensorManager(DataManager, PlotManager, StorageManager):
                                                       **kwargs)
         # Setup ring buffer
         self.ring, self.logical_shape = initialize_ring(ser_channel_key=ser_channel_key,
-                                                        window_size=window_size,
                                                         dtype=dtype,
                                                         data_mode=data_mode,
                                                         frame_shape=frame_shape)
+                
         # Setup target consumer params and enforce
         plot_target_fps = kwargs.get("plot_target_fps", 60.0)
         plot_catch_up_max = kwargs.get("plot_catchup_base_max", 2048)
@@ -62,8 +58,8 @@ class SensorManager(DataManager, PlotManager, StorageManager):
         plot_target_fps = _coerce(plot_target_fps, 60.0)
         plot_catch_up_max = int(_coerce(plot_catch_up_max, 2048))
         plot_catchup_boost = _coerce(plot_catchup_boost, 2.5)
+
         # Setup static args dict
-        # TODO: frame shape and shape are fed the same thing, so check if they should be the same, and remove 'shape' if so.
         self.static_args_dict = create_static_dict(ser_channel_key=self.ser_channel_key,
                                                    plot_channel_key=self.plot_channel_key,
                                                    commport=commport,
@@ -72,10 +68,11 @@ class SensorManager(DataManager, PlotManager, StorageManager):
                                                    shape=self.logical_shape,
                                                    dtype=dtype,
                                                    ring_capacity=4096,
-                                                   num_points=num_points,
+                                                   num_points=self.logical_shape[1] if data_mode == "line" else 1000,
                                                    data_mode=data_mode,
                                                    frame_shape=self.logical_shape
                                                    )
+        
         self.static_args_dict = update_static_dict(static_args_dict=self.static_args_dict,
                                                    plot_target_fps=plot_target_fps,
                                                    plot_catch_up_max=plot_catch_up_max,
@@ -83,9 +80,9 @@ class SensorManager(DataManager, PlotManager, StorageManager):
                                                    )
         # Setup dynamic args dict + queue
         # TODO: Is this still necessary? If not, remove all mention
-        self.dynamic_args_dict = create_dynamic_dict(num_points=num_points,
-                                                     window_size=window_size)
-
+        self.dynamic_args_dict = create_dynamic_dict(num_points=self.logical_shape[1] if data_mode == "line" else 1000,
+                                                     window_size=self.logical_shape[2])
+        
         self.dynamic_args_queue = self.setup_queue()
 
         # Make shared proxies for metrics
