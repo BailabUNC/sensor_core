@@ -96,7 +96,6 @@ class PlotManager(DictManager):
             S, D = pos0.shape
             stage = np.empty((S, D), dtype=np.float32)
             x0 = pos0[:, 0].astype(np.float32, copy=True)
-            z0 = pos0[:, 2].astype(np.float32, copy=True) if D > 2 else None
             stage[:, 0] = x0
             stage[:, 1] = pos0[:, 1]
             if D > 2:

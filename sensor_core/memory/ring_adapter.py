@@ -50,7 +50,7 @@ class RingBuffer:
         a = np.asarray(arr)
 
         if self._mode == "line":
-            if a.ndim == 2: # FIXME: in virtual_serial_port.ipynb, we are sending (C,S) arrays, not (C,P,S). Is this okay?
+            if a.ndim == 2:
                 if a.shape != (self._C, self._S):
                     raise ValueError(f"publish LINE expects (C,S) got {a.shape}")
                 frame = np.ascontiguousarray(a, dtype=self.dtype)
