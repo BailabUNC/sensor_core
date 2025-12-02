@@ -81,12 +81,7 @@ class SensorManager(DataManager, PlotManager, StorageManager):
                                                    plot_catch_up_max=plot_catch_up_max,
                                                    plot_catchup_boost=plot_catchup_boost
                                                    )
-        # Setup dynamic args dict + queue
-        # TODO: Is this still necessary? If not, remove all mention
-        self.dynamic_args_dict = create_dynamic_dict(num_points=num_points,
-                                                     window_size=window_size)
-
-        self.dynamic_args_queue = self.setup_queue()
+       
 
         # Make shared proxies for metrics
         self._mp_manager = Manager()
@@ -222,7 +217,6 @@ class SensorManager(DataManager, PlotManager, StorageManager):
                                  f"filepaths should create .hdf5 or .sqlite3 files only")
 
         odm = DataManager(static_args_dict=self.static_args_dict,
-                          dynamic_args_queue=self.dynamic_args_queue,
                           save_data=save_data,
                           filepath=filepath,
                           virtual_ser_port=virtual_ser_port,
@@ -255,30 +249,6 @@ class SensorManager(DataManager, PlotManager, StorageManager):
         return p, pm.fig
 
 
-    def update_params(self, **kwargs):
-        """ Check validity and update parameters
-
-        :param kwargs: series of parameters to update
-        :return: updates queue with new dictionary
-        """
-        self.dynamic_args_dict = update_dynamic_dict(dynamic_args_dict=self.dynamic_args_dict,
-                                                     **kwargs)
-        self.update_queue(self.dynamic_args_queue)
-
-    def setup_queue(self):
-        """ Setup queue to hold dynamic parameter dictionaries
-        :return: queue object
-        """
-        q = multiprocessing.Queue()
-        q.put(self.dynamic_args_dict)
-        return q
-
-    def update_queue(self, q):
-        """ Adding item to existing queue object
-
-        :param q: Queue object
-        """
-        q.put(self.dynamic_args_dict)
 
     def start_process(self, process):
         """ Function to start given process, and ensure safe operability with windows

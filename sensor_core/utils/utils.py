@@ -49,26 +49,6 @@ def create_static_dict(
     }
 
 
-def create_dynamic_dict(num_points: int, window_size: int, **kwargs):
-    """ Create dictionary for dynamic parameters
-    :param num_points: number of points to plot in a given subplot (timeseries data)
-    :param window_size: number of points to acquire in each update cycle
-    :return: dynamic_args_dict. dictionary containing all dynamic parameters
-    """
-    valid_keys = ['num_points', 'window_size']
-    dynamic_args_dict = {
-        "num_points": num_points,
-        "window_size": window_size
-    }
-
-    for key in kwargs:
-        if key in valid_keys:
-            dynamic_args_dict[f"{key}"] = kwargs[f"{key}"]
-        else:
-            Warning(f"Key {key} is not an acceptable input in static_args_dict.\n"
-                    f"omitted from dictionary.")
-    return dynamic_args_dict
-
 
 def update_static_dict(static_args_dict: dict, **kwargs):
     """ Update existing static args dict
@@ -90,22 +70,6 @@ def update_static_dict(static_args_dict: dict, **kwargs):
                     f"omitted from dictionary.")
     return static_args_dict
 
-
-def update_dynamic_dict(dynamic_args_dict: dict, **kwargs):
-    """ Update existing dynamic args dict
-    :param dynamic_args_dict: dictionary to update params
-    :param kwargs: all parameters you wish to update
-    :return: dynamic_args_dict. Dictionary containing all static parameters
-    """
-    valid_keys = ['num_points', 'window_size']
-
-    for key in kwargs:
-        if key in valid_keys:
-            dynamic_args_dict[f"{key}"] = kwargs[f"{key}"]
-        else:
-            Warning(f"Key {key} is not an acceptable input in static_args_dict.\n"
-                    f"omitted from dictionary.")
-    return dynamic_args_dict
 
 def _coerce(val, default):
     return val if isinstance(val, (int, float)) and not isinstance(val, bool) else default
@@ -132,10 +96,8 @@ class DictManager(object):
         """ Selects which dictionary to unpack based upon input arguments
         Key Arguments: dict_type (static or dynamic)
         """
-        if self.dict_type == "static":
-            self.unpack_online_static_dict()
-        elif self.dict_type == "dynamic":
-            self.unpack_dynamic_dict()
+        self.unpack_online_static_dict()
+
 
     def unpack_online_static_dict(self):
         """ Unpack static parameter dictionary for online/real-time use
@@ -166,16 +128,3 @@ class DictManager(object):
                 else:
                     setattr(self, f"{key}", None)
 
-    def unpack_dynamic_dict(self):
-        """ Unpack dynamic parameter dictionary (only for online use)
-        :return: adds attributes to self for each key in dict
-        """
-        essential_keys = ['num_points', 'window_size']
-
-        for key in essential_keys:
-            try:
-                setattr(self, f"{key}", self.args_dict[f"{key}"])
-            except KeyError:
-                raise KeyError(f"selected dictionary doesn't have key {key}\n"
-                               f"dictionary must include the following keys:\n"
-                               f"{essential_keys}")
