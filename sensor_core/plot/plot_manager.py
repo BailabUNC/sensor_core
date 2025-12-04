@@ -57,7 +57,7 @@ class PlotManager(DictManager):
     def initialize_fig(self):
         if self.data_mode == "line":
             fig = create_fig(plot_channel_key=self.plot_channel_key)
-            ys = initialize_fig_data(num_channel=self.num_channel, num_points=self.num_points)
+            ys = initialize_fig_data(num_channel=self.shape[2], num_points=self.shape[0])
             for i, subplot in enumerate(fig):
                 idx = divmod(i, np.shape(self.plot_channel_key)[1])
                 plot_data = ys[i]
@@ -138,9 +138,8 @@ class PlotManager(DictManager):
                     return
 
                 if self.data_mode == "line":
-                    C, L = int(self.shape[0]), int(self.shape[2])
-                    S = int(self.num_points)
-                    K = int(np.ceil(S / max(1, L)))
+                    N, S = int(self.shape[0]), int(self.shape[1])
+                    K = int(np.ceil(N / max(1, S)))
                     start = end - K + 1
                     if start < 0:
                         return
@@ -157,8 +156,8 @@ class PlotManager(DictManager):
 
                     self.metrics.update_drop_estimate(write_idx_now=wi, frames_read_this_tick=K)
 
-                    block = np.concatenate([win[i] for i in range(win.shape[0])], axis=1)  # (C, K*L)
-                    yblock = block[:, -S:]
+                    block = np.concatenate([win[i] for i in range(win.shape[0])], axis=1)  # (C, K*N)
+                    yblock = block[:, -N:]
                     yblock = np.require(yblock, dtype=np.float32, requirements=["C"])
                     if not yblock.flags["OWNDATA"]:
                         yblock = yblock.copy()

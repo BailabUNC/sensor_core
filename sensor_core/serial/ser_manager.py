@@ -71,9 +71,9 @@ class SerialManager:
     def _acquire_data(self, frame_shape, data_mode):
         """Default (fallback) reader; replace with real protocol."""
         if data_mode == "line":
-            L = int(frame_shape[2])  # window_size
-            C = int(frame_shape[0])  # channels
-            return np.zeros((L, C), dtype=np.float32)
+            N = int(frame_shape[0])  # num_points
+            C = int(frame_shape[2])  # channels
+            return np.zeros((N, C), dtype=np.float32)
         else:
             H, W, Cimg = (frame_shape[0], frame_shape[1], frame_shape[2] if len(frame_shape) == 3 else 1)
             return np.zeros((H, W, Cimg), dtype=np.float32)
@@ -84,7 +84,7 @@ class SerialManager:
         :param func: custom acquisition function
         :param data_mode: Line or Image data acquisition
         Returns:
-          LINE mode:  (L, C) float32
+          LINE mode:  (S, C) float32
           IMAGE mode: (H, W, C) uint8/float32
         """
         if func is None:
@@ -93,7 +93,7 @@ class SerialManager:
         else:
             try:
                 # supply expected frame shape to custom func
-                expected = getattr(self, "frame_shape", (self.window_size, self.num_channel))
+                expected = getattr(self, "frame_shape", (self.frame_shape[0], self.frame_shape[2]))
                 channel_data = func(
                     ser=self.ser,
                     frame_shape=expected,
@@ -110,14 +110,14 @@ class SerialManager:
 
         # Line mode
         if data_mode == "line":
-            # normalize to (L, C)
+            # normalize to (S, C)
             if arr.ndim != 2:
-                raise ValueError(f"LINE mode expects 2D (L,C), got {arr.shape}")
-            L, C = arr.shape
-            if C != self.num_channel and L == self.num_channel:
+                raise ValueError(f"LINE mode expects 2D (S, C), got {arr.shape}")
+            S, C = arr.shape
+            if C != self.num_channel and S == self.num_channel:
                 arr = arr.T
-            if arr.shape != (self.window_size, self.num_channel):
-                raise ValueError(f"LINE data shape {arr.shape} != ({self.window_size}, {self.num_channel})")
+            if arr.shape != (self.frame_shape[1], self.num_channel):
+                raise ValueError(f"LINE data shape {arr.shape} != ({self.frame_shape[1]}, {self.num_channel})")
             return arr.astype(np.float32, copy=False)
         else: # Image mode
             if arr.ndim == 2:

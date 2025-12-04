@@ -12,12 +12,13 @@ import pathlib
 
 
 class SensorManager(DataManager, PlotManager, StorageManager):
-    def __init__(self, ser_channel_key: Union[np.ndarray, str],
+    def __init__(self, 
+                 ser_channel_key: Union[np.ndarray, str],
                  commport: str,
                  baudrate: int = 115200,
                  dtype=np.float32,
                  data_mode: str = "line",
-                 frame_shape: tuple = None,
+                 frame_shape: tuple = (1000, 100, 3),
                  fast_stream_path_a: str="./serial_stream_a.bin",
                  fast_stream_path_b: str = "./serial_stream_b.bin",
                  start_stream_ingest: bool = False,
@@ -30,8 +31,7 @@ class SensorManager(DataManager, PlotManager, StorageManager):
         :param serial_channel_key: list of serial channel names
         :param commport: target serial port
         :param baudrate: target data transfer rate (in bits/sec)
-        :param num_points: number of 'time' points [num_points = time(s) * Hz]
-        :param window_size: for 1D data, number of time points to acquire before passing
+        :param frame_shape: for line data, tuple of (num_points, window_size, num_channels); for image data, tuple of (height, width, num_channels)
         :param dtype: data type to store in shared memory object
         """
         self.dtype = dtype
@@ -49,7 +49,7 @@ class SensorManager(DataManager, PlotManager, StorageManager):
                                                         dtype=dtype,
                                                         data_mode=data_mode,
                                                         frame_shape=frame_shape)
-                
+                        
         # Setup target consumer params and enforce
         plot_target_fps = kwargs.get("plot_target_fps", 60.0)
         plot_catch_up_max = kwargs.get("plot_catchup_base_max", 2048)
@@ -68,7 +68,6 @@ class SensorManager(DataManager, PlotManager, StorageManager):
                                                    shape=self.logical_shape,
                                                    dtype=dtype,
                                                    ring_capacity=4096,
-                                                   num_points=self.logical_shape[1] if data_mode == "line" else 1000,
                                                    data_mode=data_mode,
                                                    frame_shape=self.logical_shape
                                                    )
@@ -78,12 +77,6 @@ class SensorManager(DataManager, PlotManager, StorageManager):
                                                    plot_catch_up_max=plot_catch_up_max,
                                                    plot_catchup_boost=plot_catchup_boost
                                                    )
-        # Setup dynamic args dict + queue
-        # TODO: Is this still necessary? If not, remove all mention
-        self.dynamic_args_dict = create_dynamic_dict(num_points=self.logical_shape[1] if data_mode == "line" else 1000,
-                                                     window_size=self.logical_shape[2])
-        
-        self.dynamic_args_queue = self.setup_queue()
 
         # Make shared proxies for metrics
         self._mp_manager = Manager()
@@ -147,7 +140,7 @@ class SensorManager(DataManager, PlotManager, StorageManager):
                     ch_keys = list(self.ser_channel_key) if isinstance(self.ser_channel_key, (list, tuple, np.ndarray)) else [self.ser_channel_key]
                     frame_shape = ring_args.get('logical_shape', self.logical_shape)
                     _dtype = ring_args.get("dtype", dtype)
-                    # TODO: change away from 'hint' and just call them the actual kwargs (i.e. frame)shape, data_mode)
+                    # TO DO: change away from 'hint' and just call them the actual kwargs (i.e. frame)shape, data_mode)
                     self._ingest_proc = Process(target=_ingest_loop,
                                                 args=(fast_stream_path_a, fast_stream_path_b, sqlite_path, ch_keys),
                                                 kwargs={'metrics_proxy': self.ingest_metrics_proxy,
@@ -219,7 +212,6 @@ class SensorManager(DataManager, PlotManager, StorageManager):
                                  f"filepaths should create .hdf5 or .sqlite3 files only")
 
         odm = DataManager(static_args_dict=self.static_args_dict,
-                          dynamic_args_queue=self.dynamic_args_queue,
                           save_data=save_data,
                           filepath=filepath,
                           virtual_ser_port=virtual_ser_port,
@@ -250,32 +242,6 @@ class SensorManager(DataManager, PlotManager, StorageManager):
                         target=pm.online_plot_data)
 
         return p, pm.fig
-
-
-    def update_params(self, **kwargs):
-        """ Check validity and update parameters
-
-        :param kwargs: series of parameters to update
-        :return: updates queue with new dictionary
-        """
-        self.dynamic_args_dict = update_dynamic_dict(dynamic_args_dict=self.dynamic_args_dict,
-                                                     **kwargs)
-        self.update_queue(self.dynamic_args_queue)
-
-    def setup_queue(self):
-        """ Setup queue to hold dynamic parameter dictionaries
-        :return: queue object
-        """
-        q = multiprocessing.Queue()
-        q.put(self.dynamic_args_dict)
-        return q
-
-    def update_queue(self, q):
-        """ Adding item to existing queue object
-
-        :param q: Queue object
-        """
-        q.put(self.dynamic_args_dict)
 
     def start_process(self, process):
         """ Function to start given process, and ensure safe operability with windows

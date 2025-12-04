@@ -28,7 +28,6 @@ def create_static_dict(
     shape: Tuple[int, ...],
     dtype=np.float32,
     ring_capacity: int = 4096,
-    num_points: int = 1000,
     *,
     data_mode: str = "line",                 # <— NEW
     frame_shape: Optional[Tuple[int, ...]] = None  # <— NEW (logical shape)
@@ -43,31 +42,9 @@ def create_static_dict(
         "shape": tuple(shape),
         "dtype": dtype,
         "ring_capacity": int(ring_capacity),
-        "num_points": int(num_points),
         "data_mode": str(data_mode),
         "frame_shape": tuple(frame_shape) if frame_shape else None,
     }
-
-
-def create_dynamic_dict(num_points: int, window_size: int, **kwargs):
-    """ Create dictionary for dynamic parameters
-    :param num_points: number of points to plot in a given subplot (timeseries data)
-    :param window_size: number of points to acquire in each update cycle
-    :return: dynamic_args_dict. dictionary containing all dynamic parameters
-    """
-    valid_keys = ['num_points', 'window_size']
-    dynamic_args_dict = {
-        "num_points": num_points,
-        "window_size": window_size
-    }
-
-    for key in kwargs:
-        if key in valid_keys:
-            dynamic_args_dict[f"{key}"] = kwargs[f"{key}"]
-        else:
-            Warning(f"Key {key} is not an acceptable input in static_args_dict.\n"
-                    f"omitted from dictionary.")
-    return dynamic_args_dict
 
 
 def update_static_dict(static_args_dict: dict, **kwargs):
@@ -79,7 +56,7 @@ def update_static_dict(static_args_dict: dict, **kwargs):
     valid_keys = ['ser_channel_key', 'plot_channel_key',
                   'commport', 'baudrate', 'shm_name',
                   'shape', 'dtype', 'EOL', 'ring_capacity',
-                  'num_points', 'num_channel', 'plot_target_fps',
+                  'num_channel', 'plot_target_fps',
                   'plot_catch_up_max', 'plot_catchup_boost',
                   'plot_lag_frames', 'data_mode']
     for key in kwargs:
@@ -90,22 +67,6 @@ def update_static_dict(static_args_dict: dict, **kwargs):
                     f"omitted from dictionary.")
     return static_args_dict
 
-
-def update_dynamic_dict(dynamic_args_dict: dict, **kwargs):
-    """ Update existing dynamic args dict
-    :param dynamic_args_dict: dictionary to update params
-    :param kwargs: all parameters you wish to update
-    :return: dynamic_args_dict. Dictionary containing all static parameters
-    """
-    valid_keys = ['num_points', 'window_size']
-
-    for key in kwargs:
-        if key in valid_keys:
-            dynamic_args_dict[f"{key}"] = kwargs[f"{key}"]
-        else:
-            Warning(f"Key {key} is not an acceptable input in static_args_dict.\n"
-                    f"omitted from dictionary.")
-    return dynamic_args_dict
 
 def _coerce(val, default):
     return val if isinstance(val, (int, float)) and not isinstance(val, bool) else default
@@ -132,10 +93,7 @@ class DictManager(object):
         """ Selects which dictionary to unpack based upon input arguments
         Key Arguments: dict_type (static or dynamic)
         """
-        if self.dict_type == "static":
-            self.unpack_online_static_dict()
-        elif self.dict_type == "dynamic":
-            self.unpack_dynamic_dict()
+        self.unpack_online_static_dict()
 
     def unpack_online_static_dict(self):
         """ Unpack static parameter dictionary for online/real-time use
@@ -165,17 +123,3 @@ class DictManager(object):
                     setattr(self, f"{key}", num_channel)
                 else:
                     setattr(self, f"{key}", None)
-
-    def unpack_dynamic_dict(self):
-        """ Unpack dynamic parameter dictionary (only for online use)
-        :return: adds attributes to self for each key in dict
-        """
-        essential_keys = ['num_points', 'window_size']
-
-        for key in essential_keys:
-            try:
-                setattr(self, f"{key}", self.args_dict[f"{key}"])
-            except KeyError:
-                raise KeyError(f"selected dictionary doesn't have key {key}\n"
-                               f"dictionary must include the following keys:\n"
-                               f"{essential_keys}")

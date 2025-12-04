@@ -43,15 +43,15 @@ def initialize_ring(ser_channel_key, dtype, shm_name="/sensor_ring",
     :param data_mode: allow for line or image data
     :param frame_shape: input shape of each frame
     """
-    data_mode = (data_mode or "line").lower()
-    if data_mode == "line":
-        C = len(ser_channel_key) # number of serial channels
-        P = int(frame_shape[0]) # number of points
-        S = int(frame_shape[1]) # number of frames per acquisition
-        logical = (C, P, S)
+    if frame_shape is None:
+        raise ValueError("frame_shape is required")
+    if data_mode.lower() == "line":
+        logical = (
+            int(frame_shape[0]), # number of points,
+            int(frame_shape[1]), # window size (number of frames)
+            len(ser_channel_key) # number of serial channels
+        )
     else:
-        if frame_shape is None:
-            raise ValueError("frame_shape is required for data_mode='image'")
         logical = _normalize_image_shape(tuple(frame_shape))
 
     ring = RingBuffer(shm_name, int(frames_capacity), tuple(logical), data_mode, np.dtype(dtype), create=True)

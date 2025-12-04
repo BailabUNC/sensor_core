@@ -10,12 +10,16 @@ import time, traceback
 
 
 class DataManager(SerialManager, DictManager, StorageManager):
-    def __init__(self, static_args_dict: dict, dynamic_args_queue, virtual_ser_port: bool = False,
-                 save_data: bool = False, filepath: str = None, overwrite_data: bool = True, metrics_proxy=None):
+    def __init__(self,
+                 static_args_dict: dict, 
+                 virtual_ser_port: bool = False,
+                 save_data: bool = False, 
+                 filepath: str = None, 
+                 overwrite_data: bool = True, 
+                 metrics_proxy=None):
         """ Online Data Manager
         - handles serial port initialization and management of data for the online (real-time) use case ONL
         :param static_args_dict: dictionary containing key parameters for initialization
-        :param dynamic_args_queue: queue used to send dictionary with dynamic parameters
         :param virtual_ser_port: boolean, if True will not initialize serial port, instead will rely on user-defined
         custom function to generate simulated data
         :param save_data: boolean, determines whether to save data
@@ -24,7 +28,6 @@ class DataManager(SerialManager, DictManager, StorageManager):
         """
         self.metrics = RingMetrics()
         self.static_args_dict = static_args_dict
-        self.dynamic_args_queue = dynamic_args_queue
         self.save_data = save_data
         self._metrics_proxy = metrics_proxy
 
@@ -38,20 +41,12 @@ class DataManager(SerialManager, DictManager, StorageManager):
         self.unpack_selected_dict()
 
         # Initialize Buffer
-        self.ring = RingBuffer(self.shm_name, int(self.ring_capacity), 
-                               tuple(self.shape), self.data_mode,self.dtype,create=False)
+        self.ring = RingBuffer(self.shm_name,
+                               int(self.ring_capacity), 
+                               tuple(self.shape), 
+                               self.data_mode,
+                               self.dtype,create=False)
         _assert_ring_layout(self.ring, tuple(self.shape), self.dtype)
-
-        # Unpack dynamic_args_dict if it exists
-        try:
-            self.dynamic_args_dict = self.dynamic_args_queue.get()
-        except:
-            raise ValueError(f"Queue {self.dynamic_args_queue} initialization failed. "
-                             f"Please restart process")
-
-        self.select_dictionary(args_dict=self.dynamic_args_dict,
-                               dict_type="dynamic")
-        self.unpack_selected_dict()
 
         # Start serial port
         self.start_serial(virtual_ser_port=virtual_ser_port)
@@ -90,21 +85,21 @@ class DataManager(SerialManager, DictManager, StorageManager):
                 if self.data_mode=='line':
                     arr = np.asarray(ys)
                     if arr.ndim != 2:
-                        raise ValueError(f"[writer] ys ndim={arr.ndim}, expected 2 (L,C), got {arr.shape}")
+                        raise ValueError(f"[writer] ys ndim={arr.ndim}, expected 2 (N,C), got {arr.shape}")
 
-                    L_in, C_in = arr.shape
-                    C_ring, _, L_ring, = self.frame_shape  # ring frame is (C, P, L)
+                    N_in, C_in = arr.shape
+                    N_ring, _, C_ring, = self.frame_shape  # ring frame is (N, C)
 
                     if C_in != C_ring:
-                        raise ValueError(f"[writer] channels mismatch: ys (L,{C_in}), ring expects C={C_ring}")
+                        raise ValueError(f"[writer] channels mismatch: ys (N,{C_in}), ring expects C={C_ring}")
 
-                    # Clamp to ring L
-                    L = min(L_in, L_ring)
-                    if L != L_ring:
-                        arr = arr[:L, :]
+                    # Clamp to ring N
+                    N = min(N_in, N_ring)
+                    if N != N_ring:
+                        arr = arr[:N, :]
 
                     # Confirm frame is contiguous and transpose, then publish to ring
-                    frame = np.ascontiguousarray(arr.T, dtype=self.dtype)
+                    frame = np.ascontiguousarray(arr, dtype=self.dtype)
                     with timer(lambda ms: self.metrics.note_publish(ms, write_idx=int(self.ring.write_idx))):
                         self.ring.publish(frame)
                 else:

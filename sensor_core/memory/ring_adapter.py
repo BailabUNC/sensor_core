@@ -20,16 +20,16 @@ class RingBuffer:
         self._mode = str(data_mode)
 
         if (self._mode == "line"):
-            C, P, S = self.logical_shape
-            self._C, self._P, self._S = int(C), int(P), int(S)
-            self.frame_shape = (self._C, self._P, self._S)
+            N, S, C = self.logical_shape
+            self._N, self._S, self._C = int(N), int(S), int(C)
+            self.frame_shape = (int(N), int(S), int(C))
         elif (self._mode == "image"):
             H, W, C = self.logical_shape
             self._H, self._W, self._Cimg = int(H), int(W), int(C)
             self._S = self._H * self._W * self._Cimg
             self.frame_shape = (self._H, self._W, self._Cimg)
         else:
-            raise ValueError(f"frame_shape must be (C,P,S) or (H,W,C), got {self.logical_shape}")
+            raise ValueError(f"frame_shape must be (N,S,C) or (H,W,C), got {self.logical_shape}")
 
         maker = fastring.Ring.create if create else fastring.Ring.open
         self._ring = maker(self.name, int(self.capacity), int(self._S * self.dtype.itemsize))
@@ -50,21 +50,13 @@ class RingBuffer:
         a = np.asarray(arr)
 
         if self._mode == "line":
-            if a.ndim == 2:
-                if a.shape != (self._C, self._S):
-                    raise ValueError(f"publish LINE expects (C,S) got {a.shape}")
-                frame = np.ascontiguousarray(a, dtype=self.dtype)
-                self._ring.publish(frame)
-                return
-
-            if a.ndim == 3:
-                a = np.ascontiguousarray(a, dtype=self.dtype)
-                for i in range(a.shape[1]):
-                    self._ring.publish(a[i])
-                return
-
-            raise ValueError(f"publish Line expects (C,S) or (C,P,S), got {a.shape}")
-
+            if a.shape == (self._C, self._S):
+                a = a.T
+            if a.shape != (self._S, self._C):
+                raise ValueError(f"publish LINE expects (S,C) got {a.shape}")
+            frame = np.ascontiguousarray(a, dtype=self.dtype)
+            self._ring.publish(frame)
+            return
         else:
             # image mode
             if a.ndim == 3:
@@ -101,13 +93,13 @@ class RingBuffer:
                 return self._ring.view_window(start_i, frames_i, int(dim0), int(dim1))
 
         if self._mode == "line":
-            C, S = self._C, self._S
-            mv = _call_view(start, frames, C, S)
+            N, C = self._N, self._C
+            mv = _call_view(start, frames, C, N)
             try:
-                arr = np.frombuffer(mv, dtype=self.dtype, count=frames * C * S)
+                arr = np.frombuffer(mv, dtype=self.dtype, count=frames * C * N)
             except BufferError:
-                arr = np.frombuffer(mv.tobytes(), dtype=self.dtype, count=frames * C * S)
-            return arr.reshape(frames, C, S)
+                arr = np.frombuffer(mv.tobytes(), dtype=self.dtype, count=frames * C * N)
+            return arr.reshape(frames, C, N)
 
         H, W, Cimg = self._H, self._W, self._Cimg
         mv = _call_view(start, frames, H, W * Cimg)

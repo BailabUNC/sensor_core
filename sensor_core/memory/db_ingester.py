@@ -223,8 +223,8 @@ def ingest_loop(file_a: str, file_b: str, sqlite_path: str, channel_keys: List[s
 
                     delta = {"frames_ingested": 0, "bytes_read": 0, "batches_flushed": 0}
                     if mode == 'line':
-                        C, _, S = shape
-                        _ = _ingest_file_line(path, sqlite_path, channel_keys, batch_frames, dtype, C, S, delta)
+                        N, _, C = shape
+                        _ = _ingest_file_line(path, sqlite_path, channel_keys, batch_frames, dtype, N, C, delta)
                     elif mode == 'image':
                         H, W, Cimg = shape
                         _ = _ingest_file_image(path, sqlite_path, (H, W, Cimg), batch_frames, dtype, delta)
