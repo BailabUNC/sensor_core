@@ -77,6 +77,7 @@ class SensorManager(DataManager, PlotManager, StorageManager):
                                                    plot_catch_up_max=plot_catch_up_max,
                                                    plot_catchup_boost=plot_catchup_boost
                                                    )
+       
 
         # Make shared proxies for metrics
         self._mp_manager = Manager()
@@ -242,6 +243,8 @@ class SensorManager(DataManager, PlotManager, StorageManager):
                         target=pm.online_plot_data)
 
         return p, pm.fig
+
+
 
     def start_process(self, process):
         """ Function to start given process, and ensure safe operability with windows

@@ -47,6 +47,7 @@ def create_static_dict(
     }
 
 
+
 def update_static_dict(static_args_dict: dict, **kwargs):
     """ Update existing static args dict
     :param static_args_dict: dictionary to update params
@@ -95,6 +96,7 @@ class DictManager(object):
         """
         self.unpack_online_static_dict()
 
+
     def unpack_online_static_dict(self):
         """ Unpack static parameter dictionary for online/real-time use
         :return: adds attributes to self for each key in dict
@@ -123,3 +125,4 @@ class DictManager(object):
                     setattr(self, f"{key}", num_channel)
                 else:
                     setattr(self, f"{key}", None)
+
