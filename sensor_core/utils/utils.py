@@ -28,7 +28,6 @@ def create_static_dict(
     shape: Tuple[int, ...],
     dtype=np.float32,
     ring_capacity: int = 4096,
-    num_points: int = 1000,
     *,
     data_mode: str = "line",                 # <— NEW
     frame_shape: Optional[Tuple[int, ...]] = None  # <— NEW (logical shape)
@@ -43,7 +42,6 @@ def create_static_dict(
         "shape": tuple(shape),
         "dtype": dtype,
         "ring_capacity": int(ring_capacity),
-        "num_points": int(num_points),
         "data_mode": str(data_mode),
         "frame_shape": tuple(frame_shape) if frame_shape else None,
     }
@@ -59,7 +57,7 @@ def update_static_dict(static_args_dict: dict, **kwargs):
     valid_keys = ['ser_channel_key', 'plot_channel_key',
                   'commport', 'baudrate', 'shm_name',
                   'shape', 'dtype', 'EOL', 'ring_capacity',
-                  'num_points', 'num_channel', 'plot_target_fps',
+                  'num_channel', 'plot_target_fps',
                   'plot_catch_up_max', 'plot_catchup_boost',
                   'plot_lag_frames', 'data_mode']
     for key in kwargs:

@@ -16,7 +16,6 @@ def run_once(f):
     wrapper.has_run = False
     return wrapper
 
-
 class PlotManager(DictManager):
     def __init__(self, static_args_dict, metrics_proxy=None):
         """ Initialize Plot Manager Class
@@ -34,7 +33,7 @@ class PlotManager(DictManager):
 
         # Open ring (consumer)
         self.ring = RingBuffer(self.shm_name, int(self.ring_capacity),
-                               tuple(self.shape), self.dtype, create=False)
+                               tuple(self.shape), self.data_mode, self.dtype, create=False)
         _assert_ring_layout(self.ring, tuple(self.shape), self.dtype)
 
         self.metrics = RingMetrics()
@@ -58,7 +57,7 @@ class PlotManager(DictManager):
     def initialize_fig(self):
         if self.data_mode == "line":
             fig = create_fig(plot_channel_key=self.plot_channel_key)
-            ys = initialize_fig_data(num_channel=self.num_channel, num_points=self.num_points)
+            ys = initialize_fig_data(num_channel=self.shape[2], num_points=self.shape[0])
             for i, subplot in enumerate(fig):
                 idx = divmod(i, np.shape(self.plot_channel_key)[1])
                 plot_data = ys[i]
@@ -97,11 +96,13 @@ class PlotManager(DictManager):
             S, D = pos0.shape
             stage = np.empty((S, D), dtype=np.float32)
             x0 = pos0[:, 0].astype(np.float32, copy=True)
-            z0 = pos0[:, 2].astype(np.float32, copy=True) if D > 2 else None
             stage[:, 0] = x0
             stage[:, 1] = pos0[:, 1]
             if D > 2:
+                z0 = pos0[:, 2].astype(np.float32, copy=True)
                 stage[:, 2] = z0
+            else:
+                z0 = None
             self._meta[ch_key] = {"S": S, "D": D, "x0": x0, "z0": z0, "stage": stage}
 
     def _init_ring_plotting_image(self):
@@ -137,9 +138,8 @@ class PlotManager(DictManager):
                     return
 
                 if self.data_mode == "line":
-                    C, L = int(self.shape[0]), int(self.shape[1])
-                    S = int(self.num_points)
-                    K = int(np.ceil(S / max(1, L)))
+                    N, S = int(self.shape[0]), int(self.shape[1])
+                    K = int(np.ceil(N / max(1, S)))
                     start = end - K + 1
                     if start < 0:
                         return
@@ -156,8 +156,8 @@ class PlotManager(DictManager):
 
                     self.metrics.update_drop_estimate(write_idx_now=wi, frames_read_this_tick=K)
 
-                    block = np.concatenate([win[i] for i in range(win.shape[0])], axis=1)  # (C, K*L)
-                    yblock = block[:, -S:]
+                    block = np.concatenate([win[i] for i in range(win.shape[0])], axis=1)  # (C, K*N)
+                    yblock = block[:, -N:]
                     yblock = np.require(yblock, dtype=np.float32, requirements=["C"])
                     if not yblock.flags["OWNDATA"]:
                         yblock = yblock.copy()

@@ -1,35 +1,35 @@
 import numpy as np
 import fastring
-from typing import Tuple, Optional
-
-from numba.cuda.cudadecl import Cuda_imul
-
 
 class RingBuffer:
     """
     Python adapter for C++ fastring class
     Internally the native ring is always (C_flat, S_flat) with S_flat=1 for images.
     """
-
-    def __init__(self, name, capacity_frames, frame_shape, dtype, create=False):
+    def __init__(self, 
+                 name, 
+                 capacity_frames, 
+                 frame_shape, 
+                 data_mode, 
+                 dtype, 
+                 create=False):
         self.name = name
         self.capacity = int(capacity_frames)
         self.logical_shape = tuple(frame_shape)
         self.dtype = np.dtype(dtype)
+        self._mode = str(data_mode)
 
-        if len(self.logical_shape) == 2:
-            self._mode = "line"
-            C, S = self.logical_shape
-            self._C, self._S = int(C), int(S)
-            self.frame_shape = (self._C, self._S)
-        elif len(self.logical_shape) == 3:
-            self._mode = "image"
+        if (self._mode == "line"):
+            N, S, C = self.logical_shape
+            self._N, self._S, self._C = int(N), int(S), int(C)
+            self.frame_shape = (int(N), int(S), int(C))
+        elif (self._mode == "image"):
             H, W, C = self.logical_shape
             self._H, self._W, self._Cimg = int(H), int(W), int(C)
             self._S = self._H * self._W * self._Cimg
             self.frame_shape = (self._H, self._W, self._Cimg)
         else:
-            raise ValueError(f"frame_shape must be (C,S) or (H,W,C), got {self.logical_shape}")
+            raise ValueError(f"frame_shape must be (N,S,C) or (H,W,C), got {self.logical_shape}")
 
         maker = fastring.Ring.create if create else fastring.Ring.open
         self._ring = maker(self.name, int(self.capacity), int(self._S * self.dtype.itemsize))
@@ -50,21 +50,13 @@ class RingBuffer:
         a = np.asarray(arr)
 
         if self._mode == "line":
-            if a.ndim == 2:
-                if a.shape != (self._C, self._S):
-                    raise ValueError(f"publish LINE expects (C,S) got {a.shape}")
-                frame = np.ascontiguousarray(a, dtype=self.dtype)
-                self._ring.publish(frame)
-                return
-
-            if a.ndim == 3 and a.shape[1:] == (self._C, self._S):
-                a = np.ascontiguousarray(a, dtype=self.dtype)
-                for i in range(a.shape[0]):
-                    self._ring.publish(a[i])
-                return
-
-            raise ValueError(f"publish Line expects (C,S) or (N,C,S), got {a.shape}")
-
+            if a.shape == (self._C, self._S):
+                a = a.T
+            if a.shape != (self._S, self._C):
+                raise ValueError(f"publish LINE expects (S,C) got {a.shape}")
+            frame = np.ascontiguousarray(a, dtype=self.dtype)
+            self._ring.publish(frame)
+            return
         else:
             # image mode
             if a.ndim == 3:
@@ -101,13 +93,13 @@ class RingBuffer:
                 return self._ring.view_window(start_i, frames_i, int(dim0), int(dim1))
 
         if self._mode == "line":
-            C, S = self._C, self._S
-            mv = _call_view(start, frames, C, S)
+            N, C = self._N, self._C
+            mv = _call_view(start, frames, C, N)
             try:
-                arr = np.frombuffer(mv, dtype=self.dtype, count=frames * C * S)
+                arr = np.frombuffer(mv, dtype=self.dtype, count=frames * C * N)
             except BufferError:
-                arr = np.frombuffer(mv.tobytes(), dtype=self.dtype, count=frames * C * S)
-            return arr.reshape(frames, C, S)
+                arr = np.frombuffer(mv.tobytes(), dtype=self.dtype, count=frames * C * N)
+            return arr.reshape(frames, C, N)
 
         H, W, Cimg = self._H, self._W, self._Cimg
         mv = _call_view(start, frames, H, W * Cimg)

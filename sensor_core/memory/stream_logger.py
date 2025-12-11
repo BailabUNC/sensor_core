@@ -215,7 +215,7 @@ def dump_loop(file_a: str, file_b: str, shm_name: str, capacity_frames: int,
             "writer_ring": {"name": shm_name, "capacity": int(capacity_frames), "shape": tuple(frame_shape), "dtype": str(np.dtype(dtype))},
         })
     try:
-        ring = RingBuffer(shm_name, capacity_frames, frame_shape, dtype, create=False)
+        ring = RingBuffer(shm_name, capacity_frames, frame_shape, data_mode, dtype, create=False)
         writer = BinaryStreamWriter(file_a, file_b, shm_name, capacity_frames, frame_shape, dtype,
                                     data_mode=data_mode, rotate_frames=rotate_frames,
                                     rotate_seconds=rotate_seconds, overwrite=overwrite,
