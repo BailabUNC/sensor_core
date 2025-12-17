@@ -3,6 +3,7 @@ import os
 from sensor_core.data import DataManager
 from sensor_core.plot import PlotManager
 from sensor_core.memory.strg_manager import StorageManager
+from sensor_core.dsp.dsp_manager import DSPManager
 from sensor_core.memory.mem_utils import *
 from sensor_core.utils.utils import *
 from sensor_core.utils.utils import _coerce
@@ -90,6 +91,17 @@ class SensorManager(DataManager, PlotManager, StorageManager):
         self.plot_metrics_proxy.update({"init": True})
         self.ingest_metrics_proxy.update({"init": True})
         self.stream_ctrl_proxy.update({"force_rotate": False})
+
+        # Make shared proxy for DSP
+        self._plot_dsp = DSPManager()
+        self._plot_dsp_version = 0
+
+        self.plot_dsp_proxy = self._mp_manager.dict()
+        self.plot_dsp_proxy.update({
+            "version": 0,
+            "queue": [],
+            "modules": {},
+        })
 
         # Derive default bin paths
         if start_stream_ingest and (fast_stream_path_a is None or fast_stream_path_b is None):
@@ -234,7 +246,8 @@ class SensorManager(DataManager, PlotManager, StorageManager):
         :return: pointer to process and plot object
         """
         pm = PlotManager(static_args_dict=self.static_args_dict,
-                         metrics_proxy=self.plot_metrics_proxy,)
+                         metrics_proxy=self.plot_metrics_proxy,
+                         plot_dsp_proxy=self.plot_dsp_proxy,)
         if self.os_flag == 'win':
             p = Thread(name='plot',
                        target=pm.online_plot_data)
@@ -296,3 +309,43 @@ class SensorManager(DataManager, PlotManager, StorageManager):
                     "ingest_updated_unix": time.time(),
                 })
                 break
+
+    def _publish_plot_dsp_cfg(self):
+        self._plot_dsp_version += 1
+        self.plot_dsp_proxy["version"] = int(self._plot_dsp_version)
+        self.plot_dsp_proxy["queue"] = list(self._plot_dsp.dsp_modules_queue)
+        self.plot_dsp_proxy["modules"] = dict(self._plot_dsp.dsp_modules)
+
+    # UI entrypoints
+    def add_plot_dsp_module(self, name: str, target_algo: str, **kwargs):
+        """
+        Add a visualization-only DSP module. Does not affect stored data.
+        Example:
+          add_plot_dsp_module("ma1", "moving_average_filter", window_size=16, pad="percentile")
+          add_plot_dsp_module("bp1", "butterworth_filter", order=2, min_frq=1, max_frq=20, fs=200)
+        """
+        self._plot_dsp.add_dsp_module(name, target_algo, **kwargs)
+        self._publish_plot_dsp_cfg()
+
+    def remove_plot_dsp_module(self, name: str):
+        self._plot_dsp.remove_dsp_module(name)
+        self._publish_plot_dsp_cfg()
+
+    def clear_plot_dsp_modules(self):
+        self._plot_dsp.dsp_modules.clear()
+        self._plot_dsp.dsp_modules_queue.clear()
+        self._publish_plot_dsp_cfg()
+
+    def set_plot_dsp_order(self, new_queue):
+        new_queue = list(new_queue)
+        if set(new_queue) != set(self._plot_dsp.dsp_modules_queue):
+            raise ValueError("new_queue must contain exactly the existing DSP module names.")
+        self._plot_dsp.dsp_modules_queue = new_queue
+        self._publish_plot_dsp_cfg()
+
+    def get_plot_dsp_cfg(self) -> dict:
+        return {
+            "version": int(self._plot_dsp_version),
+            "queue": list(self._plot_dsp.dsp_modules_queue),
+            "modules": dict(self._plot_dsp.dsp_modules),
+        }

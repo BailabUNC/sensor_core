@@ -6,6 +6,7 @@ from .plot_utils import *
 from sensor_core.utils.utils import DictManager, _coerce
 from sensor_core.memory.strg_manager import StorageManager
 from typing import Union
+from sensor_core.dsp.dsp_manager import DSPManager
 
 
 def run_once(f):
@@ -17,7 +18,7 @@ def run_once(f):
     return wrapper
 
 class PlotManager(DictManager):
-    def __init__(self, static_args_dict, metrics_proxy=None):
+    def __init__(self, static_args_dict, metrics_proxy=None, plot_dsp_proxy=None):
         """ Initialize Plot Manager Class
         :param static_args_dict: dictionary with static parameters
         :param metrics_proxy: shared proxy for metrics to pass to parent class
@@ -30,6 +31,11 @@ class PlotManager(DictManager):
         self.plot_target_fps = _coerce(getattr(self, "plot_target_fps", None), 60.0)
         self.plot_catchup_base_max = int(_coerce(getattr(self, "plot_catchup_base_max", None), 2048))
         self.plot_catchup_boost = _coerce(getattr(self, "plot_catchup_boost", None), 2.5)
+
+        # DSP Manager setup
+        self._plot_dsp_proxy = plot_dsp_proxy
+        self._plot_dsp_local = DSPManager()
+        self._plot_dsp_version_seen = -1
 
         # Open ring (consumer)
         self.ring = RingBuffer(self.shm_name, int(self.ring_capacity),
@@ -53,6 +59,28 @@ class PlotManager(DictManager):
 
         # Register animation once (you had this twice)
         self.fig.add_animations(self.online_plot_data)
+
+    def _sync_plot_dsp_if_needed(self):
+        if self._plot_dsp_proxy is None:
+            return
+
+        try:
+            version = int(self._plot_dsp_proxy.get("version", 0))
+        except Exception:
+            version = 0
+
+        if version == self._plot_dsp_version_seen:
+            return
+
+        modules = self._plot_dsp_proxy.get("modules", {})
+        queue = self._plot_dsp_proxy.get("queue", [])
+
+        # rebuild local pipeline from plain dict/list
+        self._plot_dsp_local.dsp_modules = dict(modules) if modules else {}
+        self._plot_dsp_local.dsp_modules_queue = list(queue) if queue else []
+
+        self._plot_dsp_version_seen = version
+
 
     def initialize_fig(self):
         if self.data_mode == "line":
@@ -175,11 +203,23 @@ class PlotManager(DictManager):
                         stage = meta["stage"]
                         x0, z0 = meta["x0"], meta["z0"]
 
+                        # Check DSP Pipeline
+                        self._sync_plot_dsp_if_needed()
                         y = yblock[i]
+                        if self._plot_dsp_local.dsp_modules_queue:
+                            y = np.asarray(y, dtype=np.float32)
+                            try:
+                                y = self._plot_dsp_local.run_dsp_modules(y)
+                            except Exception as e:
+                                pass
+
+                        # Ensure correct length for the GPU stage buffer
                         if y.shape[0] != S_line:
                             y = y[-S_line:] if y.shape[0] > S_line else np.pad(y, (S_line - y.shape[0], 0))
+
                         stage[:, 0] = x0
                         stage[:, 1] = y
+
                         if D > 2 and z0 is not None:
                             stage[:, 2] = z0
 
