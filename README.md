@@ -4,8 +4,11 @@ A Python-based package for the acquisition, digital signal processing, plotting,
 
 # Key Features
 1.) Custom Serial Acquisition - Users can write and pass their own acquisition handler into the sensor_core pipeline. Refer to the [custom serial handler notebook](examples/custom_serial_acquisition.ipynb).
+
 2.) Digital Signal Processing Integration - sensor_core has a DSPManager hook enabling custom or predefined DSP algorithms to be applied prior to visualization without affecting the underlying datastream. Refer to the [DSP notebok](examples/virtual_serial_port_line_dsp.ipynb).
+
 3.) High-Speed Visualization - using fastplotlib, we can reliably visualize 2- and 3-D data at high speed. We have thus far tested only in Jupyter Notebooks. Refer to the [line](examples/virtual_serial_port_line.ipynb) and [image](examples/virtual_serial_port_image.ipynb) notebooks for visualization examples.
+
 4.) High-Bandwidth Storage - sensor_core creates temporary .bin files to stream data rapidly to before offloading to a sqlite file, enabling stable long term storage while imposing minimal delay in the real-time processing pipeline. Refer to the [line](examples/virtual_serial_port_line.ipynb) and [image](examples/virtual_serial_port_image.ipynb) notebooks for storage examples.
 
 ## Developer Installation Instructions  
