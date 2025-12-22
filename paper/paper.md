@@ -39,7 +39,7 @@ Existing software frameworks, depicted in Figure 1, vary widely in scope and des
 
 sensor_core distinguishes itself by combining end-to-end pipeline support with a modular architecture that developers can adapt to novel sensor classes. Its real-time visualization and storage capabilities are embedded, eliminating the need for third-party tools for core pipeline elements. While default methods are available for data acquisition and processing, custom methods can be integrated into the pipeline to support broader generalizability.
 
-![Overview of the sensor_core data pipeline architecture and comparison with existing tools.](sensor_core/paper/pipeline.jpg)
+![Overview of the sensor_core data pipeline architecture and comparison with existing tools.](pipeline.jpg)
 **Figure 1:** Overview of the sensor_core data pipeline architecture and related tools.
 
 ## Features
