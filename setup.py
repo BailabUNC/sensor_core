@@ -9,7 +9,8 @@ install_requires = [
     "jupyterlab",
     "pyserial",
     "fastplotlib",
-    "h5py",
+    "sqlitedict",
+    "pybind11",
 ]
 
 if sys.platform == "win32":
