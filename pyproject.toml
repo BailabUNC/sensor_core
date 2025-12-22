@@ -19,6 +19,7 @@ dependencies = [
   "pyserial",
   "fastplotlib",
   "sqlitedict",
+  "pybind11",
 ]
 
 [tool.setuptools.packages.find]
