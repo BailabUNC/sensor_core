@@ -18,7 +18,7 @@ dependencies = [
   "jupyterlab",
   "pyserial",
   "fastplotlib",
-  "h5py",
+  "sqlitedict",
 ]
 
 [tool.setuptools.packages.find]
