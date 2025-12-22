@@ -5,5 +5,4 @@ pygfx>=0.1.10
 fastplotlib
 sqlitedict
 pyserial
-h5py
 pybind11
