@@ -9,7 +9,7 @@ authors:
   - name: Nina Dhillon
   - name: Michael Kosorok
   - name: Wubin Bai
-date: 2025-06-11
+date: 2025-22-12
 ---
 
 ## Summary
@@ -39,7 +39,7 @@ Existing software frameworks, depicted in Figure 1, vary widely in scope and des
 
 sensor_core distinguishes itself by combining end-to-end pipeline support with a modular architecture that developers can adapt to novel sensor classes. Its real-time visualization and storage capabilities are embedded, eliminating the need for third-party tools for core pipeline elements. While default methods are available for data acquisition and processing, custom methods can be integrated into the pipeline to support broader generalizability.
 
-![Overview of the sensor_core data pipeline architecture and comparison with existing tools.](pipeline.jpg)
+![Overview of the sensor_core data pipeline architecture and comparison with existing tools.](pipeline.png)
 **Figure 1:** Overview of the sensor_core data pipeline architecture and related tools.
 
 ## Features
@@ -60,7 +60,7 @@ Although SQLite provides a lightweight and tabular storage format, appending hig
 
 sensor_core also leverages fastplotlib, a GPU-accelerated visualization library built on WGPU, to enable efficient rendering of both line-based and image-based sensor data streams.
 
-![Performance benchmarks for line and image data pipelines.](timing.png)
+![Performance benchmarks for line and image data pipelines.](timing.jpg)
 **Figure 2:** Writer, plotter, and ingest performance for line and image data streams.
 
 ## Software Use Cases and Impact
