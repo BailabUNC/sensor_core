@@ -45,8 +45,16 @@ jobs:
         uses: pypa/cibuildwheel@v2.21.0
         env:
           CIBW_BUILD_VERBOSITY: "2"
-          CIBW_TEST_COMMAND: 'python -X faulthandler -c "import sensor_core"'
+          CIBW_TEST_COMMAND: >
+            python -c "import traceback, sys;
+            try:
+                import sensor_core
+                print('import ok')
+            except Exception:
+                traceback.print_exc()
+                sys.exit(1)"
           CIBW_ARCHS_WINDOWS: "AMD64"
+          CIBW_ARCHS_LINUX: "x86_64"
           
       - uses: actions/upload-artifact@v4
         with:
