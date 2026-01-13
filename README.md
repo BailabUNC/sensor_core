@@ -10,12 +10,14 @@ A Python-based package for the acquisition, digital signal processing, plotting,
 3.) **High-Speed Visualization** - using fastplotlib, we can reliably visualize 2- and 3-D data at high speed. We have thus far tested only in Jupyter Notebooks. Refer to the [line](examples/virtual_serial_port_line.ipynb) and [image](examples/virtual_serial_port_image.ipynb) notebooks for visualization examples.
 
 4.) **High-Bandwidth Storage** - sensor_core creates temporary .bin files to stream data rapidly to before offloading to a sqlite file, enabling stable long term storage while imposing minimal delay in the real-time processing pipeline. Refer to the [line](examples/virtual_serial_port_line.ipynb) and [image](examples/virtual_serial_port_image.ipynb) notebooks for storage examples.
+## User Installation Instructions
+pip install sensor_pipeline
 
 ## Developer Installation Instructions  
 *select/cd into directory you want to install sensor_core*  
 ```
-git clone https://github.com/BailabUNC/MABOS_core  
-cd MABOS_core/  
+git clone https://github.com/BailabUNC/sensor_core  
+cd sensor_core/  
 pip install -r requirements.txt  
 pip install -e .
 ```
