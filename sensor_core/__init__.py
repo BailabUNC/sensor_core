@@ -1,13 +1,8 @@
-from .sensor_manager import SensorManager
-from .data import *
-from .memory import *
-from .plot import *
-from .serial import *
+__all__ = ["SensorManager"]
 
-__all__ = [
-    "SensorManager",
-    "data",
-    "memory",
-    "plot",
-    "serial"
-]
+def __getattr__(name):
+    if name == "SensorManager":
+        from .sensor_manager import SensorManager
+        return SensorManager
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+

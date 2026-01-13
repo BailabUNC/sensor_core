@@ -1,7 +1,16 @@
 import numpy as np
 from typing import *
-import fastplotlib as fpl
 
+def _fastplotlib():
+    try:
+        import fastplotlib as fpl
+        return fpl
+    except ImportError as e:
+        raise ImportError(
+            "Plotting backend could not be initialized. "
+            "If you are running headless, install a supported backend (e.g., `pip install glfw` "
+            "or `pip install pyside6`) and ensure a display is available."
+        ) from e
 
 def create_fig(plot_channel_key: Union[np.ndarray, str]):
     """ Create fastplotlib Figure (collection of subplot(s))
@@ -9,6 +18,7 @@ def create_fig(plot_channel_key: Union[np.ndarray, str]):
     :param plot_channel_key: names of subplot(s)
     :return: GridPlot object
     """
+    fpl = _fastplotlib()
     grid_shape = np.shape(plot_channel_key)
 
     fig = fpl.Figure(

@@ -1,7 +1,6 @@
 import time
 import os
 from sensor_core.data import DataManager
-from sensor_core.plot import PlotManager
 from sensor_core.memory.strg_manager import StorageManager
 from sensor_core.dsp.dsp_manager import DSPManager
 from sensor_core.memory.mem_utils import *
@@ -245,6 +244,8 @@ class SensorManager(DataManager, PlotManager, StorageManager):
         """ Initialize dedicated process to update plot
         :return: pointer to process and plot object
         """
+        from sensor_core.plot import PlotManager
+
         pm = PlotManager(static_args_dict=self.static_args_dict,
                          metrics_proxy=self.plot_metrics_proxy,
                          plot_dsp_proxy=self.plot_dsp_proxy,)
