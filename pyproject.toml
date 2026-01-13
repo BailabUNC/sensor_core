@@ -8,7 +8,7 @@ requires = [
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "sensor_core"
+name = "sensor_pipeline"
 version = "1.0.0"
 description = "Core API for acquiring, processing, visualizing, and storing sensor data in real-time"
 readme = { file = "README.md", content-type = "text/markdown" }
