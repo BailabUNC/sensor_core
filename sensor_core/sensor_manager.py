@@ -11,7 +11,7 @@ from threading import Thread
 import pathlib
 
 
-class SensorManager(DataManager, PlotManager, StorageManager):
+class SensorManager(DataManager, StorageManager):
     def __init__(self, 
                  ser_channel_key: Union[np.ndarray, str],
                  commport: str,
