@@ -24,3 +24,12 @@ dependencies = [
 
 [tool.setuptools.packages.find]
 include = ["sensor_core*"]
+
+[tool.setuptools]
+include-package-data = true
+
+[tool.setuptools.package-data]
+sensor_core = [
+  "native/fastring/*.hpp",
+  "native/fastring/*.h",
+]
