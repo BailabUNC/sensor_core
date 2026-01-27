@@ -16,6 +16,7 @@ def find_serial():
     """
     if sys.platform.startswith('win'):
         ports = ['COM%s' % (i + 1) for i in range(256)]
+    # TODO: confirm if cygwin check is necessary. 
     elif sys.platform.startswith('linux') or sys.platform.startswith('cygwin'):
         # this excludes your current terminal "/dev/tty"
         ports = glob.glob('/dev/tty[A-Za-z]*')
@@ -89,7 +90,7 @@ class SerialManager:
         """
         if func is None:
             channel_data = self._acquire_data(frame_shape=self.frame_shape,
-                                              data_mode=data_mode)  # your legacy path for line
+                                              data_mode=data_mode)
         else:
             try:
                 # supply expected frame shape to custom func
@@ -119,7 +120,8 @@ class SerialManager:
             if arr.shape != (self.frame_shape[1], self.num_channel):
                 raise ValueError(f"LINE data shape {arr.shape} != ({self.frame_shape[1]}, {self.num_channel})")
             return arr.astype(np.float32, copy=False)
-        else: # Image mode
+        # Image Mode
+        else: 
             if arr.ndim == 2:
                 arr = arr[:, :, None]
             Hexp, Wexp, Cexp = self.frame_shape
