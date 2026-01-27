@@ -29,7 +29,7 @@ sensor_core fills this gap by providing consolidated infrastructure for:
 
 The target audience includes researchers, engineers, and developers who require a lightweight but comprehensive foundation for building sensor-centric research systems. By abstracting common real-time concerns and providing extensible interfaces, sensor_core reduces the engineering overhead of custom integrations and fosters reproducible data workflows across domains.
 
-## Comparison With Related Tools
+## State of the field
 
 Existing software frameworks, depicted in Figure 1, vary widely in scope and design:
 
@@ -79,10 +79,8 @@ By consolidating acquisition, visualization, processing, and storage into a sing
 
 The authors acknowledge the contributions of collaborators and beta testers who provided valuable feedback during development. This work was supported by the North Carolina Biotechnology Translational Research Grant (NC Biotech TRG) and the 1789 Student Venture Fund at the University of North Carolina.
 
-## AI Usabe Disclosure
+## AI Usage Disclosure
 
 Generative AI tools were used to assist with drafting and editing portions of the manuscript and associated bibliography, as well as drafting the github workflow files used for CI validation. All software design, implementation, validation, and final editorial decisions were performed by the authors. 
 
 ## References
-
-References are provided in the accompanying `paper.bib` file.
