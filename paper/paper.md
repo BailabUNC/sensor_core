@@ -42,9 +42,9 @@ sensor_core distinguishes itself by combining end-to-end pipeline support with a
 ![Overview of the sensor_core data pipeline architecture and comparison with existing tools.](pipeline.png)
 **Figure 1:** Overview of the sensor_core data pipeline architecture and related tools.
 
-## Features
+## Software Design
 
-sensor_core achieves high data throughput through three primary architectural features:
+sensor_core was designed under competing constraints common in real-time sensor research: low-latency data handling, hardware variability, and abstracted API accessibility. Existing Python-based tools often optimize for one of these features at the cost of the other - for example, providing a high-throughput acquisition for only specific hardware systems. sensor_core prioritizes low-latency data handling whiole retaining extensibility for multiple hardware platforms and accessibility for research use through the following mechanisms:
 
 ### Multiprocessing and Zero-Copy Buffer Transfers
 
@@ -63,13 +63,25 @@ sensor_core also leverages fastplotlib, a GPU-accelerated visualization library 
 ![Performance benchmarks for line and image data pipelines.](timing.jpg)
 **Figure 2:** Writer, plotter, and ingest performance for line and image data streams.
 
-## Software Use Cases and Impact
+### Build vs Contribute Justification
+
+While components of sensor_core overlap with existing projects - like PySerial for acquisition - no existing framework provides an integrated, low-latency, hardware-agnostic pipeline with real-time visualization and persistent storage. As such, contributing incremental features to each existing library would not address the fundamental architectural requirements to accomplish this, such as: shared-memory management, multi-process orchestration, and synchronized data ingestion. 
+
+## Research Impact Statement
 
 sensor_core has been used in multiple photoplethysmography-based applications, including pulse oximetry and near-infrared muscle tracking systems, to enable real-time medical device experimentation. These use cases demonstrate that sensor_core supports demanding real-time workloads while enabling reproducible and transparent research workflows.
+
+Beyond these initial applications, performance benchmarks included with the repository demonstrate stable throughput for both line- and image-based data streams, validating its suitability for real-time workloads. The project is released under an open-source license, includes CI-based validation (for performing cross-platform builds and autmated smoke testing during release), example configurations within notebooks, and follows a modular design that lowers the barrier to integrating new sensor modalities within. 
+
+By consolidating acquisition, visualization, processing, and storage into a single pipeline, sensor_core reduces the design overhead typically required to prototype and validate new sensor systems. This positions the software as a reusable research infrastructure component rather than a single-purpose application. 
 
 ## Acknowledgements
 
 The authors acknowledge the contributions of collaborators and beta testers who provided valuable feedback during development. This work was supported by the North Carolina Biotechnology Translational Research Grant (NC Biotech TRG) and the 1789 Student Venture Fund at the University of North Carolina.
+
+## AI Usabe Disclosure
+
+Generative AI tools were used to assist with drafting and editing portions of the manuscript and associated bibliography, as well as drafting the github workflow files used for CI validation. All software design, implementation, validation, and final editorial decisions were performed by the authors. 
 
 ## References
 
