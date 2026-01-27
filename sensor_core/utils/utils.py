@@ -6,7 +6,7 @@ from typing import *
 
 def setup_process_start_method():
     """ Set up multiprocessing start method based on operating system
-
+    return: os_flag
     """
     if sys.platform.startswith('win'):
         multiprocessing.set_start_method("spawn", force=True)
@@ -29,10 +29,12 @@ def create_static_dict(
     dtype=np.float32,
     ring_capacity: int = 4096,
     *,
-    data_mode: str = "line",                 # <— NEW
-    frame_shape: Optional[Tuple[int, ...]] = None  # <— NEW (logical shape)
+    data_mode: str = "line",             
+    frame_shape: Optional[Tuple[int, ...]] = None
 ) -> Dict:
-    """Build the static args dict that both processes read."""
+    """Build the static args dict that all processes read.
+    return: static args dict
+    """
     return {
         "ser_channel_key": ser_channel_key,
         "plot_channel_key": plot_channel_key,
