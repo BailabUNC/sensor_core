@@ -1,0 +1,7 @@
+numpy
+pygfx>=0.1.13
+jupyterlab
+pyserial
+fastplotlib
+sqlitedict
+pybind11
