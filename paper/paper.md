@@ -1,15 +1,33 @@
 ---
-title: "sensor_core: a Python-based library for real-time acquisition, visualization, processing, and storage of custom sensor data"
+title: 'sensor_core: a Python-based library for real-time acquisition, visualization, processing, and storage of custom sensor data'
+tags:
+  - Python
+  - Real-Time
+  - Biosensors
 authors:
   - name: Arjun Putcha
+    orcid: 0000-0001-9834-3754
+    corresponding: true
+    affiliation: 1
   - name: Rachit Keyal
+    affiliation: 1
   - name: Aastha Sharma
+    affiliation: 1
   - name: Grace Sosa
+    affiliation: 1
   - name: Luke Piasecki
+    affiliation: 1
   - name: Nina Dhillon
+    affiliation: 1
   - name: Michael Kosorok
+    affiliation: 1
   - name: Wubin Bai
-date: 2025-22-12
+    affiliation: 1
+affiliations:
+  - name: University of North Carolina at Chapel Hill
+    index: 1
+date: 2026-27-03
+bibliography: paper.bib
 ---
 
 ## Summary
