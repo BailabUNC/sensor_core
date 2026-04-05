@@ -6,3 +6,4 @@ sensor_core/serial/__pycache__/
 sensor_core/examples/.ipynb_checkpoints/
 *.sqlite3
 *.bin
+.venv/
