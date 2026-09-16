@@ -1,43 +1,48 @@
 [build-system]
-requires = [
-  "setuptools>=68",
-  "wheel",
-  "pybind11>=2.13.0",
-  "numpy>=1.26"
-]
+requires = ["setuptools>=77", "pybind11>=2.13"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "sensor_pipeline"
+name = "sensor-pipeline"
 version = "1.0.0"
 description = "Core API for acquiring, processing, visualizing, and storing sensor data in real-time"
-readme = { file = "README.md", content-type = "text/markdown" }
+readme = "README.md"
 requires-python = ">=3.10"
-license = { file = "LICENSE" }
-dependencies = [
-  "numpy",
-  "pygfx>=0.1.13",
-  "jupyterlab",
-  "pyserial",
-  "fastplotlib",
-  "sqlitedict",
-  "pybind11",
+license = "Apache-2.0"
+license-files = ["LICENSE"]
+authors = [
+  { name = "Arjun Putcha" },
+  { name = "Rachit Keyal" },
+  { name = "Aastha Sharma" },
+  { name = "Grace Sosa" },
+  { name = "Luke Piasecki" },
+  { name = "Nina Dhillon" },
+  { name = "Michael Kosorok" },
+  { name = "Wubin Bai" },
 ]
+dependencies = [
+  "numpy>=1.26",
+  "scipy",
+  "pyserial",
+  "sqlitedict",
+  "fastplotlib>=0.6.1,<0.7",
+]
+
+[project.optional-dependencies]
+# Live plotting inside Jupyter (jupyterlab, jupyter-rfb, ipywidgets, sidecar)
+notebook = ["fastplotlib[notebook]"]
+
+[project.urls]
+Homepage = "https://github.com/BailabUNC/sensor_core"
+Issues = "https://github.com/BailabUNC/sensor_core/issues"
 
 [tool.setuptools.packages.find]
 include = ["sensor_core*"]
 
-[tool.setuptools]
-include-package-data = true
-
 [tool.setuptools.package-data]
-sensor_core = [
-  "native/fastring/*.hpp",
-  "native/fastring/*.h",
-]
+sensor_core = ["native/fastring/*.hpp", "native/fastring/*.h"]
 
 [tool.cibuildwheel]
 build = "cp310-* cp311-* cp312-* cp313-*"
 skip = "*musllinux* pp*"
-test-command = "python -c \"import sensor_core\""
-
+test-command = 'python -X faulthandler -c "from sensor_core import SensorManager; import sensor_core._fastring"'

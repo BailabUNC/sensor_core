@@ -4,7 +4,7 @@
 #include "ring.hpp"
 namespace py = pybind11;
 
-PYBIND11_MODULE(fastring, m) {
+PYBIND11_MODULE(_fastring, m) {
     py::class_<ShmRing>(m, "Ring")
         .def_static("create", [](const std::string& name, size_t cap, size_t fbytes) {
             return ShmRing::create(name.c_str(), cap, fbytes);

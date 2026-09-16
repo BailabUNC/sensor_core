@@ -1,5 +1,5 @@
 import numpy as np
-import fastring
+from sensor_core import _fastring as fastring
 
 class RingBuffer:
     """

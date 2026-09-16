@@ -298,7 +298,7 @@ class PlotManager(DictManager):
         """
         ys = []
         plot_shape = np.shape(plot_channel_key)
-        for key in np.reshape(plot_channel_key, newshape=(1, plot_shape[0] * plot_shape[1]))[0]:
+        for key in np.reshape(plot_channel_key, (1, plot_shape[0] * plot_shape[1]))[0]:
             data = StorageManager.load_serial_channel(key=key, filepath=filepath)
             ys.append(data)
 

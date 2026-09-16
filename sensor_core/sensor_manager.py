@@ -12,14 +12,14 @@ import pathlib
 
 
 class SensorManager(DataManager, StorageManager):
-    def __init__(self, 
+    def __init__(self,
                  ser_channel_key: Union[np.ndarray, str],
                  commport: str,
                  baudrate: int = 115200,
                  dtype=np.float32,
                  data_mode: str = "line",
                  frame_shape: tuple = (1000, 100, 3),
-                 fast_stream_path_a: str="./serial_stream_a.bin",
+                 fast_stream_path_a: str = "./serial_stream_a.bin",
                  fast_stream_path_b: str = "./serial_stream_b.bin",
                  start_stream_ingest: bool = False,
                  sqlite_path: str = "./serial_db.sqlite3",
@@ -42,14 +42,14 @@ class SensorManager(DataManager, StorageManager):
 
         # Setup serial and plot channels
         self.ser_channel_key, self.plot_channel_key = self.setup_channel_keys(
-                                                      ser_channel_key=ser_channel_key,
-                                                      **kwargs)
+            ser_channel_key=ser_channel_key,
+            **kwargs)
         # Setup ring buffer
         self.ring, self.logical_shape = initialize_ring(ser_channel_key=ser_channel_key,
                                                         dtype=dtype,
                                                         data_mode=data_mode,
                                                         frame_shape=frame_shape)
-                        
+
         # Setup target consumer params and enforce
         plot_target_fps = kwargs.get("plot_target_fps", 60.0)
         plot_catch_up_max = kwargs.get("plot_catchup_base_max", 2048)
@@ -71,13 +71,12 @@ class SensorManager(DataManager, StorageManager):
                                                    data_mode=data_mode,
                                                    frame_shape=self.logical_shape
                                                    )
-        
+
         self.static_args_dict = update_static_dict(static_args_dict=self.static_args_dict,
                                                    plot_target_fps=plot_target_fps,
                                                    plot_catch_up_max=plot_catch_up_max,
                                                    plot_catchup_boost=plot_catchup_boost
                                                    )
-       
 
         # Make shared proxies for metrics
         self._mp_manager = Manager()
@@ -132,7 +131,8 @@ class SensorManager(DataManager, StorageManager):
             frame_shape = ring_args.get('logical_shape', self.logical_shape)
             _dtype = ring_args.get("dtype", dtype)
             self._stream_proc = Process(target=_dump_loop,
-                                        args=(fast_stream_path_a, fast_stream_path_b, shm_name, capacity, frame_shape, _dtype),
+                                        args=(fast_stream_path_a, fast_stream_path_b, shm_name, capacity, frame_shape,
+                                              _dtype),
                                         kwargs={'overwrite': False,
                                                 'rotate_frames': int(rotate_frames),
                                                 'rotate_seconds': float(rotate_seconds) if rotate_seconds else None,
@@ -149,10 +149,12 @@ class SensorManager(DataManager, StorageManager):
             if ingest_enabled:
                 try:
                     from sensor_core.memory.db_ingester import ingest_loop as _ingest_loop
-                    ch_keys = list(self.ser_channel_key) if isinstance(self.ser_channel_key, (list, tuple, np.ndarray)) else [self.ser_channel_key]
+                    ch_keys = list(self.ser_channel_key) if isinstance(self.ser_channel_key,
+                                                                       (list, tuple, np.ndarray)) else [
+                        self.ser_channel_key]
                     frame_shape = ring_args.get('logical_shape', self.logical_shape)
                     _dtype = ring_args.get("dtype", dtype)
-                    # TO DO: change away from 'hint' and just call them the actual kwargs (i.e. frame)shape, data_mode)
+                    # TO DO: change away from 'hint' and just call them the actual kwargs (i.e. frame_shape, data_mode)
                     self._ingest_proc = Process(target=_ingest_loop,
                                                 args=(fast_stream_path_a, fast_stream_path_b, sqlite_path, ch_keys),
                                                 kwargs={'metrics_proxy': self.ingest_metrics_proxy,
@@ -200,7 +202,7 @@ class SensorManager(DataManager, StorageManager):
 
         plot_shape = np.shape(plot_channel_key)
 
-        for key in np.reshape(plot_channel_key, newshape=(1, plot_shape[0] * plot_shape[1]))[0]:
+        for key in np.reshape(plot_channel_key, (1, plot_shape[0] * plot_shape[1]))[0]:
             if key not in ser_channel_key:
                 raise KeyError(f'plot_channel_key must include only keys within serial_channel_key')
 
@@ -248,7 +250,7 @@ class SensorManager(DataManager, StorageManager):
 
         pm = PlotManager(static_args_dict=self.static_args_dict,
                          metrics_proxy=self.plot_metrics_proxy,
-                         plot_dsp_proxy=self.plot_dsp_proxy,)
+                         plot_dsp_proxy=self.plot_dsp_proxy, )
         if self.os_flag == 'win':
             p = Thread(name='plot',
                        target=pm.online_plot_data)
@@ -257,8 +259,6 @@ class SensorManager(DataManager, StorageManager):
                         target=pm.online_plot_data)
 
         return p, pm.fig
-
-
 
     def start_process(self, process):
         """ Function to start given process, and ensure safe operability with windows
@@ -306,7 +306,8 @@ class SensorManager(DataManager, StorageManager):
             if not (self._ingest_proc and self._ingest_proc.is_alive()):
                 self.ingest_metrics_proxy.update({
                     "ingest_alive": False,
-                    "ingest_last_error": self.ingest_metrics_proxy.get("ingest_last_error", "ingester process not alive"),
+                    "ingest_last_error": self.ingest_metrics_proxy.get("ingest_last_error",
+                                                                       "ingester process not alive"),
                     "ingest_updated_unix": time.time(),
                 })
                 break
