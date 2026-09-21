@@ -1,0 +1,70 @@
+name: tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: ${{ matrix.os }}, Python ${{ matrix.python-version }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        python-version: ["3.10", "3.14"]
+        include:
+          # The oldest supported combination: Python 3.10 with NumPy 1.26
+          - python-version: "3.10"
+            numpy: "numpy==1.26.4"
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v7
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+          cache-dependency-path: pyproject.toml
+      - name: Install sensor_core and the test dependencies
+        run: python -m pip install -e ".[test]" ${{ matrix.numpy }}
+      - name: Run the tests
+        run: python -m pytest
+
+  package:
+    name: Wheel builds and passes the tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+      - name: Build the sdist and wheel
+        run: |
+          python -m pip install build twine
+          python -m build
+          python -m twine check --strict dist/*
+      - name: Install the wheel into a clean environment
+        run: |
+          python -m venv /tmp/wheel-env
+          /tmp/wheel-env/bin/python -m pip install dist/*.whl pytest pytest-timeout
+      - name: Run the tests against the installed wheel
+        run: |
+          mkdir /tmp/wheel-tests
+          cp -r tests pyproject.toml /tmp/wheel-tests/
+          cd /tmp/wheel-tests
+          /tmp/wheel-env/bin/python -c "import sensor_core; assert 'site-packages' in sensor_core.__file__, sensor_core.__file__"
+          /tmp/wheel-env/bin/python -m pytest
