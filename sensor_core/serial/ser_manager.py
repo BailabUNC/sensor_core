@@ -1,6 +1,7 @@
 import serial
 import sys
 import glob
+import inspect
 import numpy as np
 from typing import *
 from itertools import product
@@ -54,6 +55,7 @@ class SerialManager:
         self.EOL = EOL
         self.ser = None
         self.virtual_ser_port = virtual_ser_port
+        self._checked_func = None
 
     def setup_serial(self):
         """ Sets up given serial port for a given baudrate
@@ -72,12 +74,25 @@ class SerialManager:
     def _acquire_data(self, frame_shape, data_mode):
         """Default (fallback) reader; replace with real protocol."""
         if data_mode == "line":
-            N = int(frame_shape[0])  # num_points
+            S = int(frame_shape[1])  # window_size: samples per acquisition
             C = int(frame_shape[2])  # channels
-            return np.zeros((N, C), dtype=np.float32)
+            return np.zeros((S, C), dtype=np.float32)
         else:
             H, W, Cimg = (frame_shape[0], frame_shape[1], frame_shape[2] if len(frame_shape) == 3 else 1)
             return np.zeros((H, W, Cimg), dtype=np.float32)
+
+    def _check_custom_function(self, func):
+        """ Raise a clear error, once per function, if func cannot be called as func(ser=..., frame_shape=...)
+        """
+        if func is getattr(self, "_checked_func", None):
+            return
+        try:
+            inspect.signature(func).bind(ser=None, frame_shape=None)
+        except TypeError as e:
+            raise ValueError(f'custom function {func} must accept: ser, frame_shape') from e
+        except ValueError:
+            pass  # the signature cannot be inspected; let the call itself report any problem
+        self._checked_func = func
 
     def acquire_data(self, func=None, data_mode: str='line'):
         """
@@ -92,17 +107,9 @@ class SerialManager:
             channel_data = self._acquire_data(frame_shape=self.frame_shape,
                                               data_mode=data_mode)
         else:
-            try:
-                # supply expected frame shape to custom func
-                expected = getattr(self, "frame_shape", (self.frame_shape[0], self.frame_shape[2]))
-                channel_data = func(
-                    ser=self.ser,
-                    frame_shape=expected,
-                )
-            except Exception:
-                raise ValueError(
-                    f'custom function {func} must accept: ser, frame_shape'
-                )
+            # Errors raised inside func propagate unchanged
+            self._check_custom_function(func)
+            channel_data = func(ser=self.ser, frame_shape=self.frame_shape)
 
         if channel_data is None:
             return None

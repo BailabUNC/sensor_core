@@ -6,6 +6,7 @@ from sensor_core.serial import SerialManager
 from sensor_core.utils import DictManager
 from sensor_core.memory.strg_manager import StorageManager
 from time import perf_counter
+import multiprocessing
 import time, traceback
 
 
@@ -68,14 +69,25 @@ class DataManager(SerialManager, DictManager, StorageManager):
                                virtual_ser_port=virtual_ser_port)
         self.setup_serial()
 
-    def online_update_data(self, func=None):
+    def online_update_data(self, func=None, stop_event=None):
+        """ Acquire frames and publish them to the ring buffer until stop_event is set
+        :param func: optional custom acquisition function, called as func(ser=..., frame_shape=...)
+        :param stop_event: multiprocessing.Event that ends the loop when set
+        """
         last_push = perf_counter()
         last_log = time.time()
-        while True:
+        parent = multiprocessing.parent_process()
+        next_parent_check = 0.0
+        while stop_event is None or not stop_event.is_set():
+            if parent is not None and perf_counter() >= next_parent_check:
+                if not parent.is_alive():
+                    break  # the process that owns the ring is gone
+                next_parent_check = perf_counter() + 0.5
             try:
                 with timer(lambda ms: self.metrics.add_acquire_ms(ms)):
                     ys = self.acquire_data(func=func,
                                            data_mode=self.data_mode)
+                acquired_ns = time.perf_counter_ns()  # when this frame reached the host
                 if ys is None:
                     if time.time() - last_log > 1.0:
                         print("[writer] acquire_data -> None")
@@ -83,28 +95,12 @@ class DataManager(SerialManager, DictManager, StorageManager):
                     continue
 
                 if self.data_mode=='line':
-                    arr = np.asarray(ys)
-                    if arr.ndim != 2:
-                        raise ValueError(f"[writer] ys ndim={arr.ndim}, expected 2 (N,C), got {arr.shape}")
-
-                    N_in, C_in = arr.shape
-                    N_ring, _, C_ring, = self.frame_shape  # ring frame is (N, C)
-
-                    if C_in != C_ring:
-                        raise ValueError(f"[writer] channels mismatch: ys (N,{C_in}), ring expects C={C_ring}")
-
-                    # Clamp to ring N
-                    N = min(N_in, N_ring)
-                    if N != N_ring:
-                        arr = arr[:N, :]
-
-                    # Confirm frame is contiguous and transpose, then publish to ring
-                    frame = np.ascontiguousarray(arr, dtype=self.dtype)
+                    # one acquisition, shaped (window_size, channels), fills one ring slot
                     with timer(lambda ms: self.metrics.note_publish(ms, write_idx=int(self.ring.write_idx))):
-                        self.ring.publish(frame)
+                        self.ring.publish(ys, acquired_ns)
                 else:
                     with timer(lambda ms: self.metrics.note_publish(ms)):
-                        self.ring.publish(np.asarray(ys, dtype=self.dtype))
+                        self.ring.publish(np.asarray(ys, dtype=self.dtype), acquired_ns)
 
                 wi = int(self.ring.write_idx)
                 self.metrics.last_write_idx = wi

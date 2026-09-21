@@ -3,6 +3,7 @@
 #include <atomic>
 #include <cstring>
 #include <stdexcept>
+#include <string>
 
 #ifdef _WIN32
     #include <windows.h>
@@ -19,6 +20,8 @@ struct RingHeader {
     size_t frame_bytes;
 };
 
+// Shared-memory layout: RingHeader, then one uint64 timestamp per slot, then the frame slots.
+
 struct ShmRing {
 #ifdef _WIN32
     HANDLE hMap = NULL;
@@ -30,6 +33,7 @@ struct ShmRing {
     size_t total_bytes = 0;
     uint8_t* base = nullptr;
     RingHeader* hdr = nullptr;
+    uint64_t* ts = nullptr;   // per-slot timestamps, in whatever clock the publisher uses
     uint8_t* data = nullptr;
 
     ShmRing() = default;
@@ -59,7 +63,7 @@ struct ShmRing {
         ShmRing r;
         r.capacity = capacity;
         r.frame_bytes = frame_bytes;
-        r.total_bytes = sizeof(RingHeader) + capacity * frame_bytes;
+        r.total_bytes = sizeof(RingHeader) + capacity * (sizeof(uint64_t) + frame_bytes);
 
 #ifdef _WIN32
         LARGE_INTEGER li;
@@ -109,7 +113,8 @@ struct ShmRing {
 #endif
 
         r.hdr  = reinterpret_cast<RingHeader*>(r.base);
-        r.data = r.base + sizeof(RingHeader);
+        r.ts   = reinterpret_cast<uint64_t*>(r.base + sizeof(RingHeader));
+        r.data = r.base + sizeof(RingHeader) + capacity * sizeof(uint64_t);
         r.hdr->write_idx.store(0, std::memory_order_relaxed);
         r.hdr->capacity    = capacity;
         r.hdr->frame_bytes = frame_bytes;
@@ -120,7 +125,7 @@ struct ShmRing {
         ShmRing r;
         r.capacity = capacity;
         r.frame_bytes = frame_bytes;
-        r.total_bytes = sizeof(RingHeader) + capacity * frame_bytes;
+        r.total_bytes = sizeof(RingHeader) + capacity * (sizeof(uint64_t) + frame_bytes);
 
 #ifdef _WIN32
         HANDLE hMap = OpenFileMappingA(
@@ -160,16 +165,35 @@ struct ShmRing {
 #endif
 
         r.hdr  = reinterpret_cast<RingHeader*>(r.base);
-        r.data = r.base + sizeof(RingHeader);
-        return r; 
+        r.ts   = reinterpret_cast<uint64_t*>(r.base + sizeof(RingHeader));
+        r.data = r.base + sizeof(RingHeader) + capacity * sizeof(uint64_t);
+        if (r.hdr->capacity != capacity || r.hdr->frame_bytes != frame_bytes) {
+            throw std::runtime_error(
+                std::string("ring layout mismatch: '") + name + "' was created with capacity " +
+                std::to_string(r.hdr->capacity) + " and frame_bytes " + std::to_string(r.hdr->frame_bytes) +
+                ", but opened with capacity " + std::to_string(capacity) +
+                " and frame_bytes " + std::to_string(frame_bytes));
+        }
+        return r;
     }
 
-    void publish(const void* frames, size_t nframes) {
+    // Remove the ring's name so no new process can open it. Processes that already mapped the
+    // ring keep their mapping until they release it. Windows frees the mapping automatically
+    // once its last handle closes, so there is nothing to remove there.
+    static void unlink(const char* name) {
+#ifndef _WIN32
+        shm_unlink(name);
+#endif
+    }
+
+    // Copy nframes frames into the ring, each stamped with ts_ns, then make them visible to readers.
+    void publish(const void* frames, size_t nframes, uint64_t ts_ns) {
         const uint8_t* src = static_cast<const uint8_t*>(frames);
         uint64_t idx = hdr->write_idx.load(std::memory_order_relaxed);
 
         for (size_t i = 0; i < nframes; ++i) {
             size_t slot = static_cast<size_t>((idx + i) % capacity);
+            ts[slot] = ts_ns;
             std::memcpy(data + slot * frame_bytes, src + i * frame_bytes, frame_bytes);
         }
 
@@ -197,6 +221,7 @@ private:
 #endif
         base = nullptr;
         hdr = nullptr;
+        ts = nullptr;
         data = nullptr;
         capacity = 0;
         frame_bytes = 0;
@@ -216,6 +241,7 @@ private:
         total_bytes = other.total_bytes;
         base        = other.base;
         hdr         = other.hdr;
+        ts          = other.ts;
         data        = other.data;
 
         other.capacity = 0;
@@ -223,6 +249,7 @@ private:
         other.total_bytes = 0;
         other.base = nullptr;
         other.hdr  = nullptr;
+        other.ts   = nullptr;
         other.data = nullptr;
     }
 };

@@ -1,14 +1,12 @@
 import os, json, struct, time, traceback
-from typing import List, Optional, Tuple
+import multiprocessing
+from typing import Optional, Tuple
 import numpy as np
-from sqlitedict import SqliteDict
-from .strg_manager import StorageManager
+from .stream_logger import MAGIC, VERSION as STREAM_VERSION, sealed_segments, _safe_update
+from . import strg_manager as storage
 
-MAGIC = b'SCBIN\x00\x00'
 MAGIC_LEN = len(MAGIC)
 REC_HEADER_SZ = 16
-
-def _seal_path(p: str) -> str: return p + ".seal"
 
 def _read_header(fh):
     magic = fh.read(MAGIC_LEN)
@@ -20,242 +18,182 @@ def _read_header(fh):
     hdr = json.loads(payload.decode('utf-8'))
     return ver, hdr, ver_bytes, len_bytes, payload
 
-def _ensure_sqlite_keys_line(sqlite_path: str, channel_keys: List[str], dtype: np.dtype):
-    with SqliteDict(sqlite_path) as db:
-        for k in channel_keys:
-            if k not in db:
-                db[k] = np.array([], dtype=dtype)
-        if 'time' not in db:
-            db['time'] = np.array([], dtype=np.float64)
-        db.commit()
+def _records(fh, record_bytes: int, counter: list):
+    """(frame_index, t_ns, frame bytes) of each complete record; stops at a partial last record"""
+    while True:
+        rec = fh.read(REC_HEADER_SZ)
+        if len(rec) < REC_HEADER_SZ:
+            return
+        t_ns, index = struct.unpack('<QQ', rec)
+        data = fh.read(record_bytes)
+        if len(data) < record_bytes:
+            return  # left by a crash while the record was being written
+        counter[0] += 1
+        yield index, t_ns, data
 
-def _ensure_sqlite_keys_image(sqlite_path: str, shape: Tuple[int,int,int], dtype: np.dtype):
-    with SqliteDict(sqlite_path) as db:
-        if 'image' not in db:
-            db['image'] = np.array([], dtype=dtype)  # flattened frames appended
-        if 'image_shape' not in db:
-            db['image_shape'] = tuple(shape)         # (H,W,Cimg)
-        db.commit()
-
-def _ingest_file_line(path: str, sqlite_path: str, channel_keys: List[str],
-                      batch_frames: int, dtype: np.dtype, C: int, S: int,
-                      metrics_accum: dict):
-    _ensure_sqlite_keys_line(sqlite_path, channel_keys, dtype)
-    sm = StorageManager(channel_key=channel_keys, filepath=sqlite_path, overwrite=False)
-    acc = {k: [] for k in channel_keys}
-    frames = 0; bytes_read = 0; batches = 0
-    with open(path, 'rb') as fh:
-        ver, hdr, ver_b, len_b, payload = _read_header(fh)
-        while True:
-            rec = fh.read(REC_HEADER_SZ)
-            if not rec: break
-            ts_ns, wi = struct.unpack('<QQ', rec)
-            raw = fh.read(S * C * dtype.itemsize)
-            if len(raw) < S * C * dtype.itemsize:
-                break
-            arr = np.frombuffer(raw, dtype=dtype, count=C*S).reshape(C, S)
-            for ci, key in enumerate(channel_keys):
-                acc[key].append(arr[ci])
-            frames += 1
-            bytes_read += REC_HEADER_SZ + len(raw)
-            if sum(len(v) for v in acc.values()) >= batch_frames:
-                for key in channel_keys:
-                    if acc[key]:
-                        block = np.concatenate(acc[key], axis=0)
-                        sm.append_serial_channel(key, block)
-                        acc[key].clear()
-                batches += 1
-    for key in channel_keys:
-        if acc[key]:
-            block = np.concatenate(acc[key], axis=0)
-            sm.append_serial_channel(key, block)
-            acc[key].clear()
-    metrics_accum["frames_ingested"] = metrics_accum.get("frames_ingested", 0) + frames
-    metrics_accum["bytes_read"] = metrics_accum.get("bytes_read", 0) + bytes_read
-    metrics_accum["batches_flushed"] = metrics_accum.get("batches_flushed", 0) + batches
-    return ver_b, len_b, payload
-
-def _ingest_file_image(path: str, sqlite_path: str, shape: Tuple[int,int,int],
-                       batch_frames: int, dtype: np.dtype, metrics_accum: dict):
-    H, W, Cimg = shape
-    frame_items = H * W * Cimg
-    _ensure_sqlite_keys_image(sqlite_path, shape, dtype)
-    sm = StorageManager(channel_key=['image'], filepath=sqlite_path, overwrite=False)
-    acc = []
-    frames = 0; bytes_read = 0; batches = 0
-    with open(path, 'rb') as fh:
-        ver, hdr, ver_b, len_b, payload = _read_header(fh)
-        while True:
-            rec = fh.read(REC_HEADER_SZ)
-            if not rec: break
-            ts_ns, wi = struct.unpack('<QQ', rec)
-            raw = fh.read(frame_items * dtype.itemsize)
-            if len(raw) < frame_items * dtype.itemsize:
-                break
-            arr = np.frombuffer(raw, dtype=dtype, count=frame_items)  # flat
-            acc.append(arr)
-            frames += 1
-            bytes_read += REC_HEADER_SZ + len(raw)
-            if len(acc) >= batch_frames:
-                block = np.concatenate(acc, axis=0)
-                sm.append_serial_channel('image', block)
-                acc.clear()
-                batches += 1
-    if acc:
-        block = np.concatenate(acc, axis=0)
-        sm.append_serial_channel('image', block)
-        acc.clear()
-    metrics_accum["frames_ingested"] = metrics_accum.get("frames_ingested", 0) + frames
-    metrics_accum["bytes_read"] = metrics_accum.get("bytes_read", 0) + bytes_read
-    metrics_accum["batches_flushed"] = metrics_accum.get("batches_flushed", 0) + batches
-    return ver_b, len_b, payload
-
-def ingest_loop(file_a: str, file_b: str, sqlite_path: str, channel_keys: List[str],
-                batch_frames: int = 32, sleep_s: float = 0.2,
-                metrics_proxy: Optional[dict] = None,
-                data_mode_hint: Optional[str] = None,
-                frame_shape_hint: Optional[Tuple[int, ...]] = None,
-                dtype_hint: Optional[str] = None,
-                precreate_sqlite: bool = True):
-
+def _describe(hdr: dict, path: str):
+    """(data_mode, frame shape, dtype, channels, session) of a segment, checked for consistency"""
     try:
-        # initialize metrics immediately
-        if metrics_proxy is not None:
-            metrics_proxy.update({
-                "ingest_bins_ingested": 0,
-                "ingest_frames_ingested": 0,
-                "ingest_bytes_read": 0,
-                "ingest_batches_flushed": 0,
-                "ingest_fps_estimate": 0.0,
-                "ingest_updated_unix": time.time(),
-                "ingest_alive": True,
-                "ingest_watch_paths": [os.path.abspath(file_a), os.path.abspath(file_b)],
-                "ingest_sqlite_path": os.path.abspath(sqlite_path),
-                "ingest_started": True,
-            })
-    except Exception:
-        pass
+        mode = hdr.get('data_mode', 'line')
+        shape = tuple(int(x) for x in hdr['frame_shape'])
+        dtype = np.dtype(hdr['dtype'])
+        session = hdr['session']
+        channels = [str(c) for c in hdr['channels']]
+    except (KeyError, TypeError) as e:
+        raise ValueError(f"{path} has an incomplete header: {e}") from e
+    if mode == 'line':
+        _, window, n_channels = shape
+        shape = (window, n_channels)
+        if len(channels) != n_channels:
+            raise ValueError(f"{path} names {len(channels)} channels for frames with {n_channels} channels")
+    elif mode != 'image':
+        raise ValueError(f"{path} has unknown data_mode {mode!r}")
+    return mode, shape, dtype, channels, session
 
+def ingest_segment(path: str, database) -> Tuple[dict, dict]:
+    """
+    Store one sealed segment in the database, then delete it
+    All of a segment's frames are stored in one transaction, so a segment is stored completely or not at all;
+    frames already stored (for example, from a segment ingested before a crash) are skipped.
+    :param database: path of the SQLite database, or a connection from strg_manager.connect
+    :return: (header, counts) -- the segment's header, and counts of frames read, frames stored, and bytes read
+    :raises ValueError: if the segment was written in another format
+    """
+    conn = storage.connect(database) if isinstance(database, (str, os.PathLike)) else database
     try:
-        if metrics_proxy is not None:
-            metrics_proxy.update({
-                "ingest_alive": True,
-                "ingest_starting": False
-            })
+        with open(path, 'rb') as fh:
+            ver, hdr, _, _, _ = _read_header(fh)
+            if ver != STREAM_VERSION:
+                raise ValueError(f"{path} uses stream format version {ver}; this version of sensor_core reads version {STREAM_VERSION}")
+            mode, shape, dtype, channels, session = _describe(hdr, path)
+            record_bytes = int(np.prod(shape)) * dtype.itemsize
+            read = [0]
+            with conn:
+                session_id = storage.add_session(conn, session, mode, shape, dtype, channels)
+                stored = storage.insert_frames(conn, session_id, _records(fh, record_bytes, read))
+    finally:
+        if conn is not database:
+            conn.close()
+    os.remove(path)
+    counts = {"frames_read": read[0], "frames_stored": stored, "bytes_read": read[0] * (REC_HEADER_SZ + record_bytes)}
+    return hdr, counts
 
-        def _publish_scan(seal_a: str, seal_b: str):
-            if metrics_proxy is None:
-                return
 
-            exists_a = os.path.exists(seal_a);
-            exists_b = os.path.exists(seal_b)
-            mt_a = os.path.getmtime(seal_a) if exists_a else None
-            mt_b = os.path.getmtime(seal_b) if exists_b else None
-            metrics_proxy.update({
-                "ingest_scan_seals": [seal_a, seal_b],
-                "ingest_scan_exists": [exists_a, exists_b],
-                "ingest_scan_mtime": [mt_a, mt_b],
-                "ingest_alive": True,
-                "ingest_updated_unix": time.time(),
-            })
-
-        if precreate_sqlite:
+def ingest_pending_segments(stream_dir: str, database, on_ingested=None, on_rejected=None) -> int:
+    """
+    Store every sealed segment in stream_dir, oldest first
+    A segment that cannot be stored is renamed to *.rejected so it neither blocks later segments nor
+    is retried forever; its data stays on disk for inspection.
+    :param database: path of the SQLite database, or a connection from strg_manager.connect
+    :param on_ingested: optional callback(seq, header, counts) after each segment is stored
+    :param on_rejected: optional callback(seq, path, error) for each segment set aside
+    :return: number of segments processed
+    """
+    conn = storage.connect(database) if isinstance(database, (str, os.PathLike)) else database
+    processed = 0
+    try:
+        for seq, path in sealed_segments(stream_dir):
             try:
-                if (data_mode_hint or '').lower() == 'image':
-                    if frame_shape_hint is not None and dtype_hint is not None:
-                        _ensure_sqlite_keys_image(sqlite_path, tuple(frame_shape_hint), np.dtype(dtype_hint))
-                else:
-                    _ensure_sqlite_keys_line(sqlite_path, channel_keys, np.dtype(dtype_hint or np.float32))
-            except Exception:
-                pass
+                hdr, counts = ingest_segment(path, conn)
+            except ValueError as e:
+                os.replace(path, path + ".rejected")
+                if on_rejected is not None:
+                    on_rejected(seq, path, e)
+            else:
+                if on_ingested is not None:
+                    on_ingested(seq, hdr, counts)
+            processed += 1
+    finally:
+        if conn is not database:
+            conn.close()
+    return processed
 
-        last_frames_total = 0
-        last_t = time.monotonic()
 
-        def _metrics_flush(force=False):
-            nonlocal last_frames_total, last_t
-            if metrics_proxy is None:
-                return
-            now = time.monotonic()
-            dt = now - last_t
-            if force or dt >= 1.0:
-                frames_total = int(metrics_proxy.get("ingest_frames_ingested", 0))
-                fps = (frames_total - last_frames_total) / max(1e-6, dt)
-                metrics_proxy.update({
-                    "ingest_fps_estimate": float(fps),
-                    "ingest_updated_unix": time.time(),
-                    "ingest_alive": True,
-                    "ingest_starting": False,
-                })
-                last_frames_total = frames_total
-                last_t = now
+def ingest_loop(stream_dir: str, sqlite_path: str, sleep_s: float = 0.2,
+                metrics_proxy: Optional[dict] = None, stop_event=None, ready_event=None):
+    """
+    Ingester process: move sealed segments from stream_dir into the SQLite database until stop_event is set
+    :param stop_event: when set, store every remaining sealed segment and return
+    :param ready_event: set once the database is open
+    """
+    totals = {"segments": 0, "frames": 0, "bytes": 0, "rejected": 0}
+    rate = {"frames": 0, "t": time.monotonic()}
 
-        files = [file_a, file_b]
-        while True:
-            did_work = False
-            seal_a = _seal_path(file_a)
-            seal_b = _seal_path(file_b)
-            _publish_scan(seal_a, seal_b)
-            for path in files:
-                seal = _seal_path(path)
-                if os.path.exists(seal):
-                    with open(path, 'rb') as fh:
-                        try:
-                            ver, hdr, ver_b, len_b, payload = _read_header(fh)
-                            if metrics_proxy is not None:
-                                metrics_proxy.update({
-                                    "ingest_last_header": {
-                                        "path": os.path.abspath(path),
-                                        "data_mode": hdr.get('data_mode', 'line'),
-                                        "frame_shape": tuple(hdr.get('frame_shape', [])),
-                                        "dtype": hdr.get('dtype'),
-                                    }
-                                })
-                        except ValueError as e:
-                            if metrics_proxy is not None:
-                                metrics_proxy.update({
-                                    "ingest_last_error": f"HeaderError on {os.path.abspath(path)}: {e}",
-                                })
-                            continue
-                    dtype = np.dtype(hdr['dtype'])
-                    shape = tuple(hdr['frame_shape'])
-                    mode = hdr.get('data_mode', 'line')
+    def _on_ingested(seq, hdr, counts):
+        totals["segments"] += 1
+        totals["frames"] += int(counts["frames_stored"])
+        totals["bytes"] += int(counts["bytes_read"])
+        _safe_update(metrics_proxy, {
+            "ingest_last_seq": int(seq),
+            "ingest_last_header": {
+                "data_mode": hdr.get('data_mode', 'line'),
+                "frame_shape": tuple(hdr.get('frame_shape', [])),
+                "dtype": hdr.get('dtype'),
+            },
+            "ingest_segments_ingested": totals["segments"],
+            "ingest_frames_ingested": totals["frames"],
+            "ingest_bytes_read": totals["bytes"],
+            "ingest_updated_unix": time.time(),
+        })
 
-                    delta = {"frames_ingested": 0, "bytes_read": 0, "batches_flushed": 0}
-                    if mode == 'line':
-                        N, _, C = shape
-                        _ = _ingest_file_line(path, sqlite_path, channel_keys, batch_frames, dtype, N, C, delta)
-                    elif mode == 'image':
-                        H, W, Cimg = shape
-                        _ = _ingest_file_image(path, sqlite_path, (H, W, Cimg), batch_frames, dtype, delta)
-                    else:
-                        continue
+    def _on_rejected(seq, path, error):
+        totals["rejected"] += 1
+        _safe_update(metrics_proxy, {
+            "ingest_last_seq": int(seq),
+            "ingest_segments_rejected": totals["rejected"],
+            "ingest_last_error": f"{os.path.abspath(path)}: {error}",
+        })
 
-                    if metrics_proxy is not None:
-                        metrics_proxy.update({
-                            "ingest_bins_ingested": int(metrics_proxy["ingest_bins_ingested"]) + 1,
-                            "ingest_frames_ingested": int(metrics_proxy["ingest_frames_ingested"]) + int(delta["frames_ingested"]),
-                            "ingest_bytes_read": int(metrics_proxy["ingest_bytes_read"]) + int(delta["bytes_read"]),
-                            "ingest_batches_flushed": int(metrics_proxy["ingest_batches_flushed"]) + int(delta["batches_flushed"]),
-                        })
-                        _metrics_flush(force=True)
-
-                    # truncate back to header
-                    try: os.remove(seal)
-                    except FileNotFoundError: pass
-                    with open(path, 'wb') as out:
-                        out.write(MAGIC); out.write(ver_b); out.write(len_b); out.write(payload)
-                    did_work = True
-
-            if not did_work:
-                time.sleep(sleep_s)
-            _metrics_flush(force=False)
-    except Exception as e:
-        if metrics_proxy is not None:
-            metrics_proxy.update({
-                "ingest_alive": False,
-                "ingest_last_error": f"{e.__class__.__name__}: {e}",
-                "ingest_last_traceback": ''.join(traceback.format_exc())[-2000:],
+    def _publish_rate(force=False):
+        now = time.monotonic()
+        dt = now - rate["t"]
+        if force or dt >= 1.0:
+            _safe_update(metrics_proxy, {
+                "ingest_fps_estimate": float((totals["frames"] - rate["frames"]) / max(1e-6, dt)),
+                "ingest_pending_segments": len(sealed_segments(stream_dir)),
+                "ingest_alive": True,
                 "ingest_updated_unix": time.time(),
-                "ingest_starting": False,
             })
+            rate["frames"], rate["t"] = totals["frames"], now
+
+    _safe_update(metrics_proxy, {
+        "ingest_alive": True,
+        "ingest_started": True,
+        "ingest_stream_dir": os.path.abspath(stream_dir),
+        "ingest_sqlite_path": os.path.abspath(sqlite_path),
+        "ingest_segments_ingested": 0,
+        "ingest_frames_ingested": 0,
+        "ingest_bytes_read": 0,
+        "ingest_fps_estimate": 0.0,
+        "ingest_updated_unix": time.time(),
+    })
+    parent = multiprocessing.parent_process()
+    conn = None
+    try:
+        conn = storage.connect(sqlite_path)
+        if ready_event is not None:
+            ready_event.set()
+
+        while True:
+            stopping = (stop_event is not None and stop_event.is_set()) or \
+                       (parent is not None and not parent.is_alive())
+            processed = ingest_pending_segments(stream_dir, conn,
+                                                on_ingested=_on_ingested, on_rejected=_on_rejected)
+            if processed:
+                _publish_rate(force=True)
+                continue
+            if stopping:
+                break  # a full pass after the stop request found nothing left to store
+            _publish_rate()
+            time.sleep(sleep_s)
+    except Exception as e:
+        _safe_update(metrics_proxy, {
+            "ingest_alive": False,
+            "ingest_last_error": f"{e.__class__.__name__}: {e}",
+            "ingest_last_traceback": ''.join(traceback.format_exc())[-2000:],
+            "ingest_updated_unix": time.time(),
+        })
+    finally:
+        if conn is not None:
+            conn.close()
+        _safe_update(metrics_proxy, {"ingest_alive": False, "ingest_updated_unix": time.time()})

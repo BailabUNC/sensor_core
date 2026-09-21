@@ -56,6 +56,7 @@ class PlotManager(DictManager):
         self._metrics_proxy = metrics_proxy
         self._last_push = 0.0
         self._last_read_idx = None
+        self._stopped = False
 
         # Register animation once (you had this twice)
         self.fig.add_animations(self.online_plot_data)
@@ -144,7 +145,13 @@ class PlotManager(DictManager):
                 if self._image is None:
                     self._image = subplot.graphics[-1]
 
+    def stop(self):
+        """ Stop updating the figure; it keeps showing the last frame drawn """
+        self._stopped = True
+
     def online_plot_data(self, *_, **__):
+        if self._stopped:
+            return
         target_fps = float(getattr(self, "plot_target_fps", 60.0))
         min_dt = 1.0/max(1e-6, target_fps)
         now = time.perf_counter()
@@ -167,28 +174,13 @@ class PlotManager(DictManager):
 
                 if self.data_mode == "line":
                     N, S = int(self.shape[0]), int(self.shape[1])
-                    K = int(np.ceil(N / max(1, S)))
-                    start = end - K + 1
-                    if start < 0:
+                    K = min(int(np.ceil(N / max(1, S))), cap)
+                    start = wi - lag - K
+                    traces = latest_line_traces(self.ring, self.ser_channel_key, self.plot_channel_key, N, lag)
+                    if traces is None:
                         return
 
-                    slot = start % cap
-                    first = min(K, cap - slot)
-                    win1 = self.ring.view_window(start, first)
-                    rest = K - first
-                    if rest:
-                        win2 = self.ring.view_window(start + first, rest)
-                        win = np.concatenate((win1, win2), axis=0)
-                    else:
-                        win = win1
-
                     self.metrics.update_drop_estimate(write_idx_now=wi, frames_read_this_tick=K)
-
-                    block = np.concatenate([win[i] for i in range(win.shape[0])], axis=1)  # (C, K*N)
-                    yblock = block[:, -N:]
-                    yblock = np.require(yblock, dtype=np.float32, requirements=["C"])
-                    if not yblock.flags["OWNDATA"]:
-                        yblock = yblock.copy()
 
                     ncols = int(np.shape(self.plot_channel_key)[1])
                     per_tick_gpu_ms = 0.0
@@ -205,7 +197,7 @@ class PlotManager(DictManager):
 
                         # Check DSP Pipeline
                         self._sync_plot_dsp_if_needed()
-                        y = yblock[i]
+                        y = np.asarray(traces[ch_key], dtype=np.float32)
                         if self._plot_dsp_local.dsp_modules_queue:
                             y = np.asarray(y, dtype=np.float32)
                             try:
@@ -246,16 +238,7 @@ class PlotManager(DictManager):
                         self._last_present = time.perf_counter()
                         return
 
-                    # handle wrap case
-                    slot = start % cap
-                    first = min(frames_to_read, cap - slot)
-                    win1 = self.ring.view_window(start, first)
-                    rest = frames_to_read - first
-                    if rest:
-                        win2 = self.ring.view_window(start + first, rest)
-                        win = np.concatenate((win1, win2), axis=0)
-                    else:
-                        win = win1
+                    win = self.ring.read_window(start, frames_to_read)
 
                     self.metrics.update_drop_estimate(write_idx_now=wi, frames_read_this_tick=frames_to_read)
                     latest = win[-1]
@@ -290,16 +273,17 @@ class PlotManager(DictManager):
                 return
 
     @staticmethod
-    def offline_initialize_data(filepath: str, plot_channel_key: Union[np.ndarray, str]):
+    def offline_initialize_data(filepath: str, plot_channel_key: Union[np.ndarray, str], session=None):
         """ Extract offline sensor data for set of keys
         :param filepath: define path to database to read data from
         :param plot_channel_key: define set of keys in database to plot data
+        :param session: None for all stored sessions, or one session (id, negative index, or uuid)
         :return: x and y values
         """
         ys = []
         plot_shape = np.shape(plot_channel_key)
         for key in np.reshape(plot_channel_key, (1, plot_shape[0] * plot_shape[1]))[0]:
-            data = StorageManager.load_serial_channel(key=key, filepath=filepath)
+            data = StorageManager.load_serial_channel(key=key, filepath=filepath, session=session)
             ys.append(data)
 
         num_points = len(ys[0])
@@ -307,26 +291,26 @@ class PlotManager(DictManager):
         return xs, ys
 
     @classmethod
-    def offline_plot_data(cls, filepath: str, plot_channel_key: Union[np.ndarray, str] = None):
+    def offline_plot_data(cls, filepath: str, plot_channel_key: Union[np.ndarray, str] = None, session=None):
         """ Initialize plot for offline data
         :param filepath: define path to database to read data from
-        :param plot_channel_key: define set of keys in database to plot data
+        :param plot_channel_key: define set of keys in database to plot data; defaults to every channel of the
+                                 latest line-mode session
+        :param session: None for all stored sessions, or one session (id, negative index, or uuid)
         :return: return plot object
         """
         if plot_channel_key is None:
-            database = StorageManager.load_serial_database(filepath=filepath)
-            channel_key = []
-            with database as db:
-                for key in db.keys():
-                    channel_key.append(key)
-            plot_channel_keys = [channel_key]
+            line_sessions = [s for s in StorageManager.list_sessions(filepath) if s["data_mode"] == "line"]
+            if not line_sessions:
+                raise ValueError(f"no line data in sqlite3 file at {filepath}")
+            plot_channel_keys = [line_sessions[-1]["channels"]]
         else:
             plot_channel_keys = plot_channel_key
 
-        ys = cls.offline_initialize_data(filepath=filepath, plot_channel_key=plot_channel_keys)
-        for i in range(np.shape(plot_channel_keys)[0]*np.shape(plot_channel_keys)[1]):
-            if not ys[i][:]:
-                ys[i][:] = np.ones(1000) * np.linspace(0, 1, 1000)
+        _, ys = cls.offline_initialize_data(filepath=filepath, plot_channel_key=plot_channel_keys, session=session)
+        for i in range(len(ys)):
+            if len(ys[i]) == 0:
+                ys[i] = np.ones(1000) * np.linspace(0, 1, 1000)
 
         fig = create_fig(plot_channel_key=plot_channel_keys)
 
