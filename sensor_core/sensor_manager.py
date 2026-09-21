@@ -295,8 +295,8 @@ class SensorManager(DataManager, StorageManager):
                             virtual_ser_port: bool = False, func=None):
         """ Initialize dedicated process to update data
 
-        :param save_data: boolean flag. If true, save acquired data to file and RAM, if not just update it in RAM
-        :param filepath: string denoting target filepath to create database
+        :param save_data: deprecated; storage is set up when creating the SensorManager (start_stream_ingest=True)
+        :param filepath: deprecated; the database is set when creating the SensorManager (sqlite_path)
         :param virtual_ser_port: boolean, if true data manager will not instantiate serial port. Will rely on
         user-defined custom function to generate simulated data
         :param func: optional custom function to handle serial data acquisition
@@ -304,6 +304,10 @@ class SensorManager(DataManager, StorageManager):
         """
         if self._stopped:
             raise RuntimeError("this SensorManager has been stopped; create a new one to acquire again")
+        if save_data or filepath is not None:
+            warnings.warn("save_data and filepath are deprecated and store nothing; storage is set up when creating "
+                          "the SensorManager, with start_stream_ingest=True and sqlite_path",
+                          DeprecationWarning, stacklevel=2)
         if save_data and (filepath is not None):
             filetype = pathlib.Path(filepath).suffix
             if filetype != ".hdf5" and filetype != ".sqlite3":
@@ -330,15 +334,33 @@ class SensorManager(DataManager, StorageManager):
         self._acquire_workers.append(p)
         return p
 
-    def setup_plotting_process(self):
-        """ Initialize dedicated process to update plot
-        :return: pointer to process and plot object
+    def create_plot(self):
+        """ Create the live plot; display it with its .show() method
+
+        The figure updates itself from the ring buffer while it is shown, so it needs no process of its own.
+        Create it after starting acquisition: on Linux and macOS, worker processes are started by forking this
+        process, which is safest before the plot initializes the GPU.
+        :return: fastplotlib Figure
         """
+        if self._stopped:
+            raise RuntimeError("this SensorManager has been stopped; create a new one to plot again")
         from sensor_core.plot import PlotManager
 
         pm = PlotManager(static_args_dict=self.static_args_dict,
                          metrics_proxy=self.plot_metrics_proxy,
                          plot_dsp_proxy=self.plot_dsp_proxy, )
+        self._plot_managers.append(pm)
+        return pm.fig
+
+    def setup_plotting_process(self):
+        """ Deprecated: use create_plot(), which returns the figure
+        :return: pointer to a process (not needed; the figure updates itself while shown) and plot object
+        """
+        warnings.warn("setup_plotting_process() is deprecated; use create_plot(), which returns the figure. "
+                      "The figure updates itself while it is shown, so no plotting process is needed.",
+                      DeprecationWarning, stacklevel=2)
+        fig = self.create_plot()
+        pm = self._plot_managers[-1]
         if self.os_flag == 'win':
             p = Thread(name='plot',
                        target=pm.online_plot_data,
@@ -346,9 +368,8 @@ class SensorManager(DataManager, StorageManager):
         else:
             p = Process(name='plot',
                         target=pm.online_plot_data)
-        self._plot_managers.append(pm)
         self._plot_workers.append(p)
-        return p, pm.fig
+        return p, fig
 
     def start_process(self, process):
         """ Function to start given process, and ensure safe operability with windows

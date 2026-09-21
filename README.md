@@ -39,14 +39,14 @@ sessions = StorageManager.list_sessions(db)                   # runs stored in t
 red = StorageManager.load_serial_channel("red", db, session=-1)  # every sample of one channel, latest run
 times = StorageManager.load_frame_times(db, session=-1)          # acquisition time of each frame, ns since the Unix epoch
 ```
-A line-mode frame is one acquisition of `window_size` samples, so each timestamp covers that many samples of every channel. Timestamps come from the host's monotonic clock, which all processes on the machine share, so streams recorded on the same computer can be aligned; `load_frame_times(..., clock="monotonic")` returns those values directly. The database is plain SQLite, readable from any language: a `sessions` table holds each run's settings and clock anchor, and a `frames` table holds one row per frame with its index, timestamp, and raw bytes. The format is described in [`strg_manager.py`](sensor_core/memory/strg_manager.py).
+A line-mode frame is one acquisition of `window_size` samples, so each timestamp covers that many samples of every channel. Timestamps come from the host's monotonic clock, which all processes on the machine share, so streams recorded on the same computer can be aligned; `load_frame_times(..., clock="monotonic")` returns those values directly. The database is plain SQLite, readable from any language: a `sessions` table holds each run's settings and clock anchor, and a `frames` table holds one row per frame with its index, timestamp, and raw bytes. The format is described in [`strg_manager.py`](sensor_core/memory/strg_manager.py). For a complete script that acquires, stores, and checks data without a display, see [`examples/virtual_serial_port_line.py`](examples/virtual_serial_port_line.py).
 
 ## Running the Tests
 ```
 pip install -e ".[test]"
 pytest
 ```
-The ([![tests](https://github.com/BailabUNC/sensor_core/actions/workflows/tests.yml/badge.svg)](https://github.com/BailabUNC/sensor_core/actions/workflows/tests.yml)) run on Linux, macOS, and Windows for every push and pull request. They cover acquisition, digital signal processing, the shared-memory ring buffer, storage, and the data sent to live plots; rendering itself needs a GPU and is not tested. Tests marked `processes` start worker processes; skip them with `pytest -m "not processes"`.
+The ([![tests](https://github.com/BailabUNC/sensor_core/actions/workflows/tests.yml/badge.svg)](https://github.com/BailabUNC/sensor_core/actions/workflows/tests.yml)) run on Linux, macOS, and Windows for every push and pull request. They cover acquisition, digital signal processing, the shared-memory ring buffer, storage, and the example script. Tests that render figures, including the example notebooks, run when `SENSOR_CORE_RENDER_TESTS=1` is set; they need the notebook extras and a GPU or a software renderer (on Linux, `sudo apt-get install mesa-vulkan-drivers`), and CI runs them on Linux. Tests marked `processes` start worker processes; skip them with `pytest -m "not processes"`.
 
 ## Acquiring, Plotting, and Saving Data in Real-Time
 The following data was captured by [MABOS](https://github.com/BailabUNC/MABOS/tree/master): a proprietary biosensor we developed. 
