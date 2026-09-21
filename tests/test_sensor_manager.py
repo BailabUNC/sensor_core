@@ -207,3 +207,11 @@ def test_each_run_is_stored_as_its_own_session(make_manager):
     assert [s["uuid"] for s in sessions] == [first.session["uuid"], second.session["uuid"]]
     assert sessions[-1]["channels"] == KEYS and sessions[-1]["frame_shape"] == (WINDOW, len(KEYS))
     assert_stored_from_start(second.sqlite_path, second.ring.write_idx, session=-1)
+
+
+@pytest.mark.processes
+def test_the_old_storage_arguments_of_update_data_process_are_deprecated(make_manager, tmp_path):
+    manager = make_manager()
+    with pytest.warns(DeprecationWarning, match="store nothing"):
+        manager.update_data_process(save_data=True, filepath=str(tmp_path / "unused.sqlite3"),
+                                    virtual_ser_port=True, func=counting_acquisition())

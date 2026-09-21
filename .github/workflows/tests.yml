@@ -64,7 +64,29 @@ jobs:
       - name: Run the tests against the installed wheel
         run: |
           mkdir /tmp/wheel-tests
-          cp -r tests pyproject.toml /tmp/wheel-tests/
+          cp -r tests examples pyproject.toml /tmp/wheel-tests/
           cd /tmp/wheel-tests
           /tmp/wheel-env/bin/python -c "import sensor_core; assert 'site-packages' in sensor_core.__file__, sensor_core.__file__"
           /tmp/wheel-env/bin/python -m pytest
+
+  examples:
+    name: Example notebooks and plots (software rendering)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+      - name: Install a software renderer (lavapipe)
+        run: sudo apt-get update && sudo apt-get install -y mesa-vulkan-drivers
+      - name: Install sensor_core with the notebook and test dependencies
+        run: python -m pip install -e ".[notebook,test]"
+      - name: Run the example notebooks and plotting tests
+        run: python -m pytest tests/test_examples.py tests/test_plotting.py
+        env:
+          SENSOR_CORE_RENDER_TESTS: "1"
