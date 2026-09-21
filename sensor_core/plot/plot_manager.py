@@ -273,16 +273,17 @@ class PlotManager(DictManager):
                 return
 
     @staticmethod
-    def offline_initialize_data(filepath: str, plot_channel_key: Union[np.ndarray, str]):
+    def offline_initialize_data(filepath: str, plot_channel_key: Union[np.ndarray, str], session=None):
         """ Extract offline sensor data for set of keys
         :param filepath: define path to database to read data from
         :param plot_channel_key: define set of keys in database to plot data
+        :param session: None for all stored sessions, or one session (id, negative index, or uuid)
         :return: x and y values
         """
         ys = []
         plot_shape = np.shape(plot_channel_key)
         for key in np.reshape(plot_channel_key, (1, plot_shape[0] * plot_shape[1]))[0]:
-            data = StorageManager.load_serial_channel(key=key, filepath=filepath)
+            data = StorageManager.load_serial_channel(key=key, filepath=filepath, session=session)
             ys.append(data)
 
         num_points = len(ys[0])
@@ -290,26 +291,26 @@ class PlotManager(DictManager):
         return xs, ys
 
     @classmethod
-    def offline_plot_data(cls, filepath: str, plot_channel_key: Union[np.ndarray, str] = None):
+    def offline_plot_data(cls, filepath: str, plot_channel_key: Union[np.ndarray, str] = None, session=None):
         """ Initialize plot for offline data
         :param filepath: define path to database to read data from
-        :param plot_channel_key: define set of keys in database to plot data
+        :param plot_channel_key: define set of keys in database to plot data; defaults to every channel of the
+                                 latest line-mode session
+        :param session: None for all stored sessions, or one session (id, negative index, or uuid)
         :return: return plot object
         """
         if plot_channel_key is None:
-            database = StorageManager.load_serial_database(filepath=filepath)
-            channel_key = []
-            with database as db:
-                for key in db.keys():
-                    channel_key.append(key)
-            plot_channel_keys = [channel_key]
+            line_sessions = [s for s in StorageManager.list_sessions(filepath) if s["data_mode"] == "line"]
+            if not line_sessions:
+                raise ValueError(f"no line data in sqlite3 file at {filepath}")
+            plot_channel_keys = [line_sessions[-1]["channels"]]
         else:
             plot_channel_keys = plot_channel_key
 
-        ys = cls.offline_initialize_data(filepath=filepath, plot_channel_key=plot_channel_keys)
-        for i in range(np.shape(plot_channel_keys)[0]*np.shape(plot_channel_keys)[1]):
-            if not ys[i][:]:
-                ys[i][:] = np.ones(1000) * np.linspace(0, 1, 1000)
+        _, ys = cls.offline_initialize_data(filepath=filepath, plot_channel_key=plot_channel_keys, session=session)
+        for i in range(len(ys)):
+            if len(ys[i]) == 0:
+                ys[i] = np.ones(1000) * np.linspace(0, 1, 1000)
 
         fig = create_fig(plot_channel_key=plot_channel_keys)
 

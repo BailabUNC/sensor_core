@@ -52,11 +52,12 @@ def stored(sqlite_path, key):
     return np.asarray(StorageManager.load_serial_channel(key, filepath=sqlite_path))
 
 
-def assert_stored_from_start(sqlite_path, acquisitions):
+def assert_stored_from_start(sqlite_path, acquisitions, session=None):
     """Every channel holds exactly the first `acquisitions` acquisitions, in order."""
     for channel, key in enumerate(KEYS):
         expected = np.arange(acquisitions * WINDOW) * len(KEYS) + channel
-        np.testing.assert_array_equal(stored(sqlite_path, key), expected)
+        np.testing.assert_array_equal(
+            StorageManager.load_serial_channel(key, filepath=sqlite_path, session=session), expected)
 
 
 def wait_until(condition, timeout=30):
@@ -171,3 +172,38 @@ def test_without_storage_no_writer_or_ingester_runs(make_manager):
 def test_the_old_stream_path_arguments_are_deprecated(make_manager):
     with pytest.warns(DeprecationWarning, match="no longer used"):
         make_manager(fast_stream_path_a="./a.bin", fast_stream_path_b="./b.bin")
+
+
+@pytest.mark.processes
+def test_stored_frames_carry_their_acquisition_times(make_manager):
+    before = time.time_ns()
+    manager = make_manager(start_stream_ingest=True)
+    start_acquiring(manager)
+    wait_until(lambda: manager.ring.write_idx >= 20)
+    manager.stop()
+    after = time.time_ns()
+    session = manager.session["uuid"]
+    unix = StorageManager.load_frame_times(manager.sqlite_path, session=session)
+    monotonic = StorageManager.load_frame_times(manager.sqlite_path, session=session, clock="monotonic")
+    assert len(unix) == manager.ring.write_idx
+    assert np.all(np.diff(monotonic) > 0)
+    assert before <= unix[0] and unix[-1] <= after
+    # each acquisition sleeps 2 ms, so frames are at least that far apart; the writer's
+    # batched polling would instead give many frames the same time
+    assert np.median(np.diff(monotonic)) >= 1_900_000
+
+
+@pytest.mark.processes
+def test_each_run_is_stored_as_its_own_session(make_manager):
+    first = make_manager(start_stream_ingest=True)
+    start_acquiring(first)
+    wait_until(lambda: first.ring.write_idx >= 5)
+    first.close()
+    second = make_manager(start_stream_ingest=True)
+    start_acquiring(second)
+    wait_until(lambda: second.ring.write_idx >= 5)
+    second.stop()
+    sessions = StorageManager.list_sessions(second.sqlite_path)
+    assert [s["uuid"] for s in sessions] == [first.session["uuid"], second.session["uuid"]]
+    assert sessions[-1]["channels"] == KEYS and sessions[-1]["frame_shape"] == (WINDOW, len(KEYS))
+    assert_stored_from_start(second.sqlite_path, second.ring.write_idx, session=-1)

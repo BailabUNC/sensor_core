@@ -1,11 +1,14 @@
-import os, re, json, struct, time, traceback
+import os, re, json, struct, time, uuid, traceback
 import multiprocessing
 from typing import List, Tuple, Optional
 import numpy as np
 from .ring_adapter import RingBuffer
+from sensor_core.utils.utils import clock_anchor
 
 MAGIC = b'SCBIN\x00\x00'
-VERSION = 2  # 2: one record per frame (a whole acquisition in line mode), global frame indices
+# 2: one record per frame (a whole acquisition in line mode), global frame indices
+# 3: records carry each frame's acquisition time; headers name the channels and the session
+VERSION = 3
 
 SEGMENT_RE = re.compile(r"^stream_(\d+)\.bin$")
 PART_RE = re.compile(r"^stream_(\d+)\.bin\.part$")
@@ -24,6 +27,12 @@ def sealed_segments(stream_dir: str) -> List[Tuple[int, str]]:
         return []
     found = [(int(m.group(1)), os.path.join(stream_dir, n)) for n in names if (m := SEGMENT_RE.match(n))]
     return sorted(found)
+
+
+def new_session() -> dict:
+    """Identity and clock anchor for a session that stores frames"""
+    unix_ns, monotonic_ns = clock_anchor()
+    return {"uuid": uuid.uuid4().hex, "started_unix_ns": unix_ns, "started_monotonic_ns": monotonic_ns}
 
 
 def _has_records(path: str) -> bool:
@@ -67,7 +76,8 @@ class BinaryStreamWriter:
     def __init__(self, stream_dir: str, ring_name: str, capacity_frames: int,
                  frame_shape: Tuple[int, ...], dtype, data_mode: str = 'line',
                  rotate_frames: int = 8192, rotate_seconds: Optional[float] = None,
-                 metrics_proxy: Optional[dict] = None):
+                 metrics_proxy: Optional[dict] = None, channels: Optional[List[str]] = None,
+                 session: Optional[dict] = None):
         """
         Append-only binary logger that writes numbered segment files
         Frames go to the active segment, stream_NNNNNN.bin.part. Sealing a segment renames it to
@@ -81,6 +91,8 @@ class BinaryStreamWriter:
         :param rotate_frames: seal the active segment after this many frames
         :param rotate_seconds: seal the active segment after this many seconds
         :param metrics_proxy: metrics proxy for timing analysis
+        :param channels: channel names, stored in each segment's header
+        :param session: session identity and clock anchor (see new_session); a new one by default
         """
         self.stream_dir = os.path.abspath(stream_dir)
         self.ring_name = ring_name
@@ -90,6 +102,10 @@ class BinaryStreamWriter:
         self.data_mode = data_mode
         self.rotate_frames = int(rotate_frames)
         self.rotate_seconds = float(rotate_seconds) if rotate_seconds else None
+        self.session = dict(session) if session else new_session()
+        if channels is None:
+            channels = [f"ch{i}" for i in range(self.frame_shape[2])] if data_mode == 'line' else ['image']
+        self.channels = [str(c) for c in channels]
         self._fh = None
         self._part = None
         self._frames_written_in_active = 0
@@ -158,6 +174,8 @@ class BinaryStreamWriter:
             'dtype': str(self.dtype),
             'data_mode': self.data_mode,
             'version': VERSION,
+            'channels': self.channels,
+            'session': self.session,
         }
         payload = json.dumps(header).encode('utf-8')
         fh.write(MAGIC)
@@ -216,14 +234,14 @@ class BinaryStreamWriter:
         self._seal_segment()
         self._publish_heartbeat(force=True)
 
-    def write_frames(self, buf: memoryview, frame_bytes: int, first_index: int, nframes: int, ts_ns: int):
+    def write_frames(self, buf: memoryview, frame_bytes: int, first_index: int, nframes: int, ts_ns):
         """
         Append frames to the active segment, one record per frame
         :param buf: bytes of nframes consecutive frames
         :param frame_bytes: size of one frame in bytes
         :param first_index: global index of the first frame (the ring's write index when it was published)
         :param nframes: number of frames in buf
-        :param ts_ns: timestamp stored with each frame
+        :param ts_ns: acquisition time of each frame (time.perf_counter_ns), or one time for all of them
         """
         if nframes <= 0:
             self._maybe_time_rotate()
@@ -231,13 +249,14 @@ class BinaryStreamWriter:
             return
 
         b = _contiguous_bytes_view(memoryview(buf))
+        stamps = np.broadcast_to(np.asarray(ts_ns, dtype=np.uint64), (nframes,))
         remaining = nframes
         idx = 0
         while remaining > 0:
             can_write = min(remaining, max(1, self.rotate_frames - self._frames_written_in_active))
             for i in range(can_write):
                 off = (idx + i) * frame_bytes
-                self._fh.write(struct.pack('<QQ', ts_ns, first_index + idx + i))
+                self._fh.write(struct.pack('<QQ', int(stamps[idx + i]), first_index + idx + i))
                 self._fh.write(b[off:off+frame_bytes])
             self._frames_written_in_active += can_write
             self._m_total_frames += can_write
@@ -268,11 +287,10 @@ def drain_ring(ring: RingBuffer, writer: BinaryStreamWriter, last_idx: int) -> T
     dropped = max(0, start - last_idx)
     if dropped:
         writer.note_dropped(dropped)
-    ts_ns = time.time_ns()
     idx = start
     while idx < wi:
         n = min(wi - idx, cap - idx % cap)  # stop at the end of the ring, then continue from slot 0
-        writer.write_frames(ring.view_window_bytes(idx, n), ring.frame_bytes, idx, n, ts_ns)
+        writer.write_frames(ring.view_window_bytes(idx, n), ring.frame_bytes, idx, n, ring.view_timestamps(idx, n))
         idx += n
     return wi, dropped
 
@@ -281,7 +299,8 @@ def dump_loop(stream_dir: str, shm_name: str, capacity_frames: int,
               frame_shape: Tuple[int, ...], dtype, data_mode: str = 'line',
               poll_hz: float = 400.0, rotate_frames: int = 8192,
               rotate_seconds: Optional[float] = None, metrics_proxy: Optional[dict] = None,
-              stop_event=None, seal_event=None, ready_event=None, start_idx: int = 0):
+              stop_event=None, seal_event=None, ready_event=None, start_idx: int = 0,
+              channels: Optional[List[str]] = None, session: Optional[dict] = None):
     """
     Writer process: copy frames from the ring buffer into segment files until stop_event is set
     :param stop_event: when set, write everything published so far, seal the last segment, and return
@@ -289,6 +308,8 @@ def dump_loop(stream_dir: str, shm_name: str, capacity_frames: int,
     :param ready_event: set once the writer is attached to the ring and can accept frames
     :param start_idx: index of the first frame to write; 0 writes everything the ring has held since it was
                       created, including frames published before this process started
+    :param channels: channel names, stored with the data
+    :param session: session identity and clock anchor (see new_session)
     """
     _safe_update(metrics_proxy, {
             "writer_alive": True,
@@ -301,7 +322,8 @@ def dump_loop(stream_dir: str, shm_name: str, capacity_frames: int,
         ring = RingBuffer(shm_name, capacity_frames, frame_shape, data_mode, dtype, create=False)
         writer = BinaryStreamWriter(stream_dir, shm_name, capacity_frames, frame_shape, dtype,
                                     data_mode=data_mode, rotate_frames=rotate_frames,
-                                    rotate_seconds=rotate_seconds, metrics_proxy=metrics_proxy)
+                                    rotate_seconds=rotate_seconds, metrics_proxy=metrics_proxy,
+                                    channels=channels, session=session)
         last_idx = int(start_idx)
         period = 1.0 / poll_hz
         seals = 0
@@ -313,7 +335,7 @@ def dump_loop(stream_dir: str, shm_name: str, capacity_frames: int,
             next_idx, _ = drain_ring(ring, writer, last_idx)
             if next_idx == last_idx:
                 # idle: still check time-based rotation and publish a heartbeat
-                writer.write_frames(memoryview(b""), ring.frame_bytes, next_idx, 0, time.time_ns())
+                writer.write_frames(memoryview(b""), ring.frame_bytes, next_idx, 0, 0)
             last_idx = next_idx
 
             if seal_event is not None and seal_event.is_set():

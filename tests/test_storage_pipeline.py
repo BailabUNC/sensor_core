@@ -6,6 +6,7 @@ was published. "Per poll" is how many frames accumulate in the ring between
 two polls of the writer; in the package that depends on timing, so these
 tests pin it down.
 """
+import shutil
 import threading
 
 import numpy as np
@@ -15,7 +16,7 @@ from harness import image_frames, line_acquisitions
 from sensor_core.memory.db_ingester import ingest_loop, ingest_segment
 from sensor_core.memory.mem_utils import initialize_ring
 from sensor_core.memory.stream_logger import dump_loop
-from sensor_core.memory.strg_manager import StorageManager
+from sensor_core.memory.strg_manager import StorageManager, list_sessions
 
 LINE_KEYS = ["red", "infrared", "violet"]
 LINE_SHAPE = (100, 10, 3)  # (num_points, window_size, channels), as in the example notebooks
@@ -75,14 +76,19 @@ def test_frames_overwritten_before_the_writer_reads_them_are_reported(storage_pi
         np.testing.assert_array_equal(pipeline.stored(key), acquisitions[4:, :, channel].ravel())
 
 
-def test_ingesting_with_the_wrong_number_of_channel_keys_fails_loudly(storage_pipeline):
+def test_a_segment_stored_again_after_a_crash_is_not_duplicated(storage_pipeline, tmp_path):
     pipeline = storage_pipeline(keys=LINE_KEYS, frame_shape=LINE_SHAPE, dtype=np.float32)
-    pipeline.publish(line_acquisitions(2, window=10, channels=3))
+    acquisitions = line_acquisitions(4, window=10, channels=3)
+    pipeline.publish(acquisitions)
     pipeline.drain()
     pipeline.rotate()
     (_, segment), = pipeline.sealed()
-    with pytest.raises(ValueError, match="2 channel keys given for 3 channels"):
-        ingest_segment(segment, pipeline.sqlite_path, ["red", "infrared"])
+    shutil.copy(segment, tmp_path / "copy.bin")
+    ingest_segment(segment, pipeline.sqlite_path)
+    # the ingester crashed after committing but before deleting the segment, so it is stored again
+    shutil.copy(tmp_path / "copy.bin", segment)
+    ingest_segment(segment, pipeline.sqlite_path)
+    np.testing.assert_array_equal(pipeline.stored("red"), acquisitions[:, :, 0].ravel())
 
 
 @pytest.mark.parametrize("dtype, frames_per_poll", [
@@ -118,22 +124,23 @@ def test_rotation_keeps_frames_the_ingester_has_not_reached(storage_pipeline):
     np.testing.assert_array_equal(pipeline.stored_images(), frames)
 
 
-@pytest.mark.xfail(strict=True, reason="#57: the ingester discards each record's timestamp")
 @pytest.mark.parametrize("data_mode", ["line", "image"])
-def test_every_stored_frame_has_a_timestamp(storage_pipeline, data_mode):
+def test_every_stored_frame_keeps_its_acquisition_time(storage_pipeline, data_mode):
     if data_mode == "line":
         pipeline = storage_pipeline(keys=LINE_KEYS, frame_shape=LINE_SHAPE, dtype=np.float32)
         frames = line_acquisitions(5, window=10, channels=3)
     else:
         pipeline = storage_pipeline(keys=["camera"], frame_shape=IMAGE_SHAPE, dtype=np.float32, data_mode="image")
         frames = image_frames(5, IMAGE_SHAPE, np.float32)
-    pipeline.publish(frames)
-    pipeline.drain()
+    acquired = [10_000_000 + 1_000 * k for k in range(5)]  # when each frame was acquired
+    pipeline.publish(frames, timestamps=acquired)
+    pipeline.drain()  # much later: the writer's own time must not replace the acquisition time
     pipeline.rotate()
     pipeline.ingest()
-    times = pipeline.stored("time")
-    assert len(times) == len(frames)
-    assert np.all(np.diff(times) >= 0)
+    np.testing.assert_array_equal(pipeline.stored_times(), acquired)
+    session = pipeline.session
+    np.testing.assert_array_equal(pipeline.stored_times(clock="unix"),
+                                  [session["started_unix_ns"] + t - session["started_monotonic_ns"] for t in acquired])
 
 
 def test_worker_loops_store_frames_published_before_and_while_they_run(tmp_path, shm_name):
@@ -149,8 +156,9 @@ def test_worker_loops_store_frames_published_before_and_while_they_run(tmp_path,
     writer_stop, writer_ready = threading.Event(), threading.Event()
     ingest_stop, ingest_ready = threading.Event(), threading.Event()
     writer = threading.Thread(target=dump_loop, args=(stream_dir, shm_name, 64, shape, np.float32),
-                              kwargs={"stop_event": writer_stop, "ready_event": writer_ready})
-    ingester = threading.Thread(target=ingest_loop, args=(stream_dir, sqlite_path, LINE_KEYS),
+                              kwargs={"stop_event": writer_stop, "ready_event": writer_ready,
+                                      "channels": LINE_KEYS})
+    ingester = threading.Thread(target=ingest_loop, args=(stream_dir, sqlite_path),
                                 kwargs={"stop_event": ingest_stop, "ready_event": ingest_ready})
     writer.start()
     ingester.start()
@@ -166,3 +174,5 @@ def test_worker_loops_store_frames_published_before_and_while_they_run(tmp_path,
     for channel, key in enumerate(LINE_KEYS):
         np.testing.assert_array_equal(StorageManager.load_serial_channel(key, filepath=sqlite_path),
                                       acquisitions[:, :, channel].ravel())
+    (session,) = list_sessions(sqlite_path)
+    assert session["channels"] == LINE_KEYS and session["frames"] == 20

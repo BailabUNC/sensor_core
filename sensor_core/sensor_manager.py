@@ -228,10 +228,13 @@ class SensorManager(DataManager, StorageManager):
         self._plot_managers = []
         self._stream_proc = None
         self._ingest_proc = None
+        self.session = None
 
         if self.storage_enabled:
-            from sensor_core.memory.stream_logger import dump_loop
+            from sensor_core.memory.stream_logger import dump_loop, new_session
             from sensor_core.memory.db_ingester import ingest_loop
+            # Stored frames carry this session's identity and clock anchor (see strg_manager)
+            self.session = new_session()
             self._stream_proc = Process(name="stream_writer", target=dump_loop,
                                         args=(self.stream_dir, self.shm_name, self.ring_capacity,
                                               self.logical_shape, self.dtype),
@@ -242,14 +245,12 @@ class SensorManager(DataManager, StorageManager):
                                                 "stop_event": self._writer_stop,
                                                 "seal_event": self._seal_request,
                                                 "ready_event": self._writer_ready,
-                                                "start_idx": 0})
+                                                "start_idx": 0,
+                                                "channels": list(self.ser_channel_key),
+                                                "session": self.session})
             self._ingest_proc = Process(name="stream_ingester", target=ingest_loop,
-                                        args=(self.stream_dir, self.sqlite_path, list(self.ser_channel_key)),
+                                        args=(self.stream_dir, self.sqlite_path),
                                         kwargs={"metrics_proxy": self.ingest_metrics_proxy,
-                                                "data_mode_hint": self.data_mode,
-                                                "frame_shape_hint": self.logical_shape,
-                                                "dtype_hint": self.dtype,
-                                                "precreate_sqlite": True,
                                                 "stop_event": self._ingest_stop,
                                                 "ready_event": self._ingest_ready})
             self.start_process(self._stream_proc)

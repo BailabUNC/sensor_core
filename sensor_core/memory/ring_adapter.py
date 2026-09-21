@@ -1,3 +1,4 @@
+import time
 import numpy as np
 from sensor_core import _fastring as fastring
 
@@ -16,6 +17,7 @@ class RingBuffer:
     Each slot of the ring holds one frame:
       line mode:  one acquisition, shaped (window_size, channels)
       image mode: one image, shaped (height, width, channels)
+    and the time it was acquired, in nanoseconds of the host's monotonic clock (time.perf_counter_ns).
     """
     def __init__(self,
                  name,
@@ -54,12 +56,14 @@ class RingBuffer:
     def frame_bytes(self) -> int:
         return int(self._ring.frame_bytes)
 
-    def publish(self, arr):
+    def publish(self, arr, timestamp_ns=None):
         """
         Publish one frame, or a batch of image frames, to the ring buffer
         :param arr: line mode: (window_size, channels), or (channels, window_size) which is transposed;
                     image mode: (height, width, channels) or a batch (n, height, width, channels)
+        :param timestamp_ns: when the frame was acquired, from time.perf_counter_ns(); defaults to now
         """
+        ts = time.perf_counter_ns() if timestamp_ns is None else int(timestamp_ns)
         a = np.asarray(arr)
 
         if self._mode == "line":
@@ -67,11 +71,11 @@ class RingBuffer:
                 a = a.T
             if a.shape != self.slot_shape:
                 raise ValueError(f"publish LINE expects (S,C) = {self.slot_shape}, got {a.shape}")
-            self._ring.publish(np.ascontiguousarray(a, dtype=self.dtype))
+            self._ring.publish(np.ascontiguousarray(a, dtype=self.dtype), ts)
             return
 
         if a.shape == self.slot_shape or (a.ndim == 4 and a.shape[1:] == self.slot_shape):
-            self._ring.publish(np.ascontiguousarray(a, dtype=self.dtype))
+            self._ring.publish(np.ascontiguousarray(a, dtype=self.dtype), ts)
             return
         raise ValueError(f"publish Image expects (H,W,C) or (N,H,W,C) with (H,W,C) = {self.slot_shape}, got {a.shape}")
 
@@ -86,6 +90,17 @@ class RingBuffer:
             return np.empty((0, *self.slot_shape), dtype=self.dtype)
         raw = self._ring.view_bytes(int(start), frames)  # uint8 array that keeps the ring mapped
         return raw.view(self.dtype).reshape((frames, *self.slot_shape))
+
+    def view_timestamps(self, start: int, frames: int):
+        """
+        Read-only acquisition timestamps (time.perf_counter_ns) of consecutive frames
+        :param start: logical index of the first frame
+        :param frames: number of frames; the window must not wrap past the end of the ring
+        """
+        frames = int(frames)
+        if frames <= 0:
+            return np.empty(0, dtype=np.uint64)
+        return self._ring.view_timestamps(int(start), frames)
 
     def read_window(self, start: int, frames: int):
         """

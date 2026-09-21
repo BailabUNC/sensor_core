@@ -19,14 +19,14 @@ PYBIND11_MODULE(_fastring, m) {
         .def_property_readonly("write_idx", [](const ShmRing& r) {
             return (uint64_t) r.hdr->write_idx.load(std::memory_order_acquire);
         })
-        .def("publish", [](ShmRing& r, py::array arr) {
+        .def("publish", [](ShmRing& r, py::array arr, uint64_t ts_ns) {
             py::gil_scoped_release release;
             if (!(arr.flags() & py::array::c_style))
                 throw std::runtime_error("array must be C-contiguous");
             size_t nbytes = (size_t)arr.nbytes();
             if (nbytes % r.frame_bytes != 0)
                 throw std::runtime_error("size not multiple of frame_bytes");
-            r.publish(arr.data(), nbytes / r.frame_bytes);
+            r.publish(arr.data(), nbytes / r.frame_bytes, ts_ns);
         })
         // Read-only bytes of `frames` consecutive frames starting at logical index `start`, as a
         // uint8 array. The caller applies the dtype and shape, so every dtype works. The array's base
@@ -43,5 +43,16 @@ PYBIND11_MODULE(_fastring, m) {
                             self);
             bytes.attr("setflags")(py::arg("write") = false);
             return bytes;
+        })
+        // Read-only timestamps of the same frames, with the same lifetime guarantee as view_bytes.
+        .def("view_timestamps", [](py::object self, uint64_t start, size_t frames) {
+            ShmRing& r = self.cast<ShmRing&>();
+            size_t slot = (size_t)(start % r.capacity);
+            if (frames > r.capacity - slot)
+                throw std::runtime_error("window wraps the ring; split it into two calls");
+            py::array_t<uint64_t> stamps({(py::ssize_t)frames}, {(py::ssize_t)sizeof(uint64_t)},
+                                         r.ts + slot, self);
+            stamps.attr("setflags")(py::arg("write") = false);
+            return stamps;
         });
 }

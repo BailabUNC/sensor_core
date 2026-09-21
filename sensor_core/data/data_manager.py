@@ -87,6 +87,7 @@ class DataManager(SerialManager, DictManager, StorageManager):
                 with timer(lambda ms: self.metrics.add_acquire_ms(ms)):
                     ys = self.acquire_data(func=func,
                                            data_mode=self.data_mode)
+                acquired_ns = time.perf_counter_ns()  # when this frame reached the host
                 if ys is None:
                     if time.time() - last_log > 1.0:
                         print("[writer] acquire_data -> None")
@@ -96,10 +97,10 @@ class DataManager(SerialManager, DictManager, StorageManager):
                 if self.data_mode=='line':
                     # one acquisition, shaped (window_size, channels), fills one ring slot
                     with timer(lambda ms: self.metrics.note_publish(ms, write_idx=int(self.ring.write_idx))):
-                        self.ring.publish(ys)
+                        self.ring.publish(ys, acquired_ns)
                 else:
                     with timer(lambda ms: self.metrics.note_publish(ms)):
-                        self.ring.publish(np.asarray(ys, dtype=self.dtype))
+                        self.ring.publish(np.asarray(ys, dtype=self.dtype), acquired_ns)
 
                 wi = int(self.ring.write_idx)
                 self.metrics.last_write_idx = wi

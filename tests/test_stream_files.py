@@ -7,16 +7,17 @@ import numpy as np
 
 from harness import image_frames
 from sensor_core.memory.db_ingester import _read_header, ingest_pending_segments
-from sensor_core.memory.stream_logger import MAGIC, BinaryStreamWriter, sealed_segments
-from sensor_core.memory.strg_manager import StorageManager
+from sensor_core.memory.stream_logger import MAGIC, BinaryStreamWriter, new_session, sealed_segments
+from sensor_core.memory.strg_manager import StorageManager, list_sessions
 
 KEYS = ["red", "infrared", "violet"]
 FRAME_SHAPE = (100, 10, 3)
 ONE_FRAME = np.ones((10, 3), np.float32)  # one acquisition for FRAME_SHAPE
 
 
-def make_writer(stream_dir):
-    return BinaryStreamWriter(str(stream_dir), "ring", 16, FRAME_SHAPE, np.float32, rotate_frames=10**9)
+def make_writer(stream_dir, channels=KEYS, session=None):
+    return BinaryStreamWriter(str(stream_dir), "ring", 16, FRAME_SHAPE, np.float32, rotate_frames=10**9,
+                              channels=channels, session=session)
 
 
 def write_one_frame(writer, index=0):
@@ -93,7 +94,7 @@ def test_a_segment_that_cannot_be_stored_is_set_aside(tmp_path):
 
     db = str(tmp_path / "db.sqlite3")
     rejected = []
-    ingest_pending_segments(str(stream_dir), db, KEYS,
+    ingest_pending_segments(str(stream_dir), db,
                             on_rejected=lambda seq, path, error: rejected.append((seq, str(error))))
     assert len(rejected) == 1 and rejected[0][0] == 1 and "format version 1" in rejected[0][1]
     assert (stream_dir / "stream_000001.bin.rejected").exists()  # kept for inspection
@@ -113,3 +114,28 @@ def test_records_carry_each_frames_global_index(storage_pipeline):
     record_size = 16 + pipeline.ring.frame_bytes
     indices = [struct.unpack_from("<QQ", records, offset)[1] for offset in range(0, len(records), record_size)]
     assert indices == list(range(10))  # keeps counting past the 4-slot ring, so gaps are detectable
+
+
+def test_recovered_segments_keep_the_session_and_channels_they_were_written_with(tmp_path):
+    crashed_session = new_session()
+    crashed = make_writer(tmp_path / "stream", channels=["a", "b", "c"], session=crashed_session)
+    write_one_frame(crashed)
+    crashed._fh.close()  # the process dies before sealing its active segment
+    make_writer(tmp_path / "stream", channels=KEYS).close()  # the next session, with different channel names
+
+    db = str(tmp_path / "db.sqlite3")
+    ingest_pending_segments(str(tmp_path / "stream"), db)
+    (session,) = list_sessions(db)
+    assert session["uuid"] == crashed_session["uuid"]
+    assert session["channels"] == ["a", "b", "c"]
+    assert session["frames"] == 1
+
+
+def test_a_segment_whose_header_contradicts_its_frames_is_set_aside(tmp_path):
+    writer = make_writer(tmp_path / "stream", channels=["red", "infrared"])  # frames have 3 channels
+    write_one_frame(writer)
+    writer.close()
+    rejected = []
+    ingest_pending_segments(str(tmp_path / "stream"), str(tmp_path / "db.sqlite3"),
+                            on_rejected=lambda seq, path, error: rejected.append(str(error)))
+    assert len(rejected) == 1 and "names 2 channels for frames with 3 channels" in rejected[0]

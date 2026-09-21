@@ -1,7 +1,25 @@
 import numpy as np
 import sys
+import time
 import multiprocessing
 from typing import *
+
+
+def clock_anchor():
+    """ Read the wall clock and the host's monotonic clock as close together as possible
+
+    Frames are timestamped with the monotonic clock (time.perf_counter_ns), which never jumps and is shared
+    by every process on the machine. One anchor per session converts those timestamps to wall-clock time.
+    :return: (unix_ns, monotonic_ns)
+    """
+    best = None
+    for _ in range(5):
+        before = time.perf_counter_ns()
+        unix_ns = time.time_ns()
+        after = time.perf_counter_ns()
+        if best is None or after - before < best[0]:
+            best = (after - before, unix_ns, (before + after) // 2)
+    return best[1], best[2]
 
 
 def setup_process_start_method():

@@ -1,5 +1,6 @@
 """Shared-memory ring buffer: publishing, reading back, wrap-around, and layout checks."""
 import gc
+import time
 
 import numpy as np
 import pytest
@@ -111,3 +112,19 @@ def test_views_keep_the_ring_mapped_after_it_is_released(shm_name):
     del ring
     gc.collect()
     np.testing.assert_array_equal(view, frames)
+
+
+def test_frames_keep_the_timestamps_they_were_published_with(shm_name):
+    ring = make_ring(shm_name, capacity=4)
+    for k, frame in enumerate(image_frames(6, IMAGE_SHAPE, np.float32)):
+        ring.publish(frame, timestamp_ns=1_000 + k)
+    np.testing.assert_array_equal(ring.view_timestamps(2, 2), [1_002, 1_003])
+    np.testing.assert_array_equal(ring.view_timestamps(4, 2), [1_004, 1_005])  # wrapped into slots 0 and 1
+
+
+def test_frames_are_timestamped_when_published_by_default(shm_name):
+    ring = make_ring(shm_name)
+    before = time.perf_counter_ns()
+    ring.publish(image_frames(1, IMAGE_SHAPE, np.float32)[0])
+    after = time.perf_counter_ns()
+    assert before <= ring.view_timestamps(0, 1)[0] <= after
