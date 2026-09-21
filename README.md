@@ -29,6 +29,13 @@ pip install -e ".[notebook]"
 ```
 Python changes take effect immediately. After editing the C++ sources in `sensor_core/native/fastring/`, rerun the install command to rebuild the extension.
 
+## Running the Tests
+```
+pip install -e ".[test]"
+pytest
+```
+The ([![tests](https://github.com/BailabUNC/sensor_core/actions/workflows/tests.yml/badge.svg)](https://github.com/BailabUNC/sensor_core/actions/workflows/tests.yml)) run on Linux, macOS, and Windows for every push and pull request. They cover acquisition, digital signal processing, the shared-memory ring buffer, storage, and the data sent to live plots; rendering itself needs a GPU and is not tested. Tests marked `xfail` document known defects tracked in [#57](https://github.com/BailabUNC/sensor_core/issues/57). Tests marked `processes` start worker processes; skip them with `pytest -m "not processes"`.
+
 ## Acquiring, Plotting, and Saving Data in Real-Time
 The following data was captured by [MABOS](https://github.com/BailabUNC/MABOS/tree/master): a proprietary biosensor we developed. 
 

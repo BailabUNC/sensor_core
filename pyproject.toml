@@ -31,6 +31,7 @@ dependencies = [
 [project.optional-dependencies]
 # Live plotting inside Jupyter (jupyterlab, jupyter-rfb, ipywidgets, sidecar)
 notebook = ["fastplotlib[notebook]"]
+test = ["pytest>=8", "pytest-timeout>=2.3"]
 
 [project.urls]
 Homepage = "https://github.com/BailabUNC/sensor_core"
@@ -41,6 +42,16 @@ include = ["sensor_core*"]
 
 [tool.setuptools.package-data]
 sensor_core = ["native/fastring/*.hpp", "native/fastring/*.h"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["tests"]
+addopts = ["-ra", "--strict-markers"]
+xfail_strict = true
+timeout = 120
+markers = [
+  "processes: starts worker processes, which exercises platform-specific multiprocessing",
+]
 
 [tool.cibuildwheel]
 build = "cp310-* cp311-* cp312-* cp313-*"
