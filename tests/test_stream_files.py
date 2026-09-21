@@ -139,3 +139,14 @@ def test_a_segment_whose_header_contradicts_its_frames_is_set_aside(tmp_path):
     ingest_pending_segments(str(tmp_path / "stream"), str(tmp_path / "db.sqlite3"),
                             on_rejected=lambda seq, path, error: rejected.append(str(error)))
     assert len(rejected) == 1 and "names 2 channels for frames with 3 channels" in rejected[0]
+
+
+def test_segments_are_sealed_before_they_outgrow_rotate_bytes(tmp_path):
+    record = 16 + ONE_FRAME.nbytes
+    writer = BinaryStreamWriter(str(tmp_path), "ring", 16, FRAME_SHAPE, np.float32, rotate_frames=10**9,
+                                rotate_bytes=3 * record, channels=KEYS)
+    frames = np.ones((7, 10, 3), np.float32)
+    writer.write_frames(memoryview(frames.tobytes()), ONE_FRAME.nbytes, 0, 7, 0)
+    writer.close()
+    sizes = [len(read_segment(path)[2]) // record for _, path in sealed_segments(tmp_path)]
+    assert sizes == [3, 3, 1]  # every segment holds at most rotate_bytes of records

@@ -186,7 +186,8 @@ struct ShmRing {
 #endif
     }
 
-    // Copy nframes frames into the ring, each stamped with ts_ns, then make them visible to readers.
+    // Copy nframes frames into the ring, each stamped with ts_ns. Each frame becomes visible to readers as
+    // soon as it is complete, so at most one slot (the oldest frame's) is ever being rewritten.
     void publish(const void* frames, size_t nframes, uint64_t ts_ns) {
         const uint8_t* src = static_cast<const uint8_t*>(frames);
         uint64_t idx = hdr->write_idx.load(std::memory_order_relaxed);
@@ -195,9 +196,8 @@ struct ShmRing {
             size_t slot = static_cast<size_t>((idx + i) % capacity);
             ts[slot] = ts_ns;
             std::memcpy(data + slot * frame_bytes, src + i * frame_bytes, frame_bytes);
+            hdr->write_idx.store(idx + i + 1, std::memory_order_release);
         }
-
-        hdr->write_idx.store(idx + nframes, std::memory_order_release);
     }
 
 private:

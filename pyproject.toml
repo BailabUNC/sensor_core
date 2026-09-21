@@ -31,6 +31,8 @@ dependencies = [
 # Live plotting inside Jupyter (jupyterlab, jupyter-rfb, ipywidgets, sidecar)
 notebook = ["fastplotlib[notebook]"]
 test = ["pytest>=8", "pytest-timeout>=2.3"]
+# Drawing benchmark results (benchmarks/plot_results.py)
+benchmark = ["matplotlib"]
 
 [project.urls]
 Homepage = "https://github.com/BailabUNC/sensor_core"

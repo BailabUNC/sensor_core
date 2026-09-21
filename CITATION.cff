@@ -1,0 +1,48 @@
+# When the JOSS paper is published, add a preferred-citation entry with its DOI, so that
+# GitHub's "Cite this repository" button cites the paper. Update version and date-released at each release.
+cff-version: 1.2.0
+message: "If you use sensor_core in your research, please cite it as below."
+type: software
+title: sensor_core
+abstract: >-
+  sensor_core is an open-source Python framework for real-time acquisition, visualization,
+  processing, and storage of data from custom and heterogeneous sensors.
+authors:
+  - given-names: Arjun
+    family-names: Putcha
+    affiliation: University of North Carolina at Chapel Hill
+    orcid: "https://orcid.org/0000-0001-9834-3754"
+  - given-names: Rachit
+    family-names: Keyal
+    affiliation: University of North Carolina at Chapel Hill
+  - given-names: Aastha
+    family-names: Sharma
+    affiliation: University of North Carolina at Chapel Hill
+  - given-names: Grace
+    family-names: Sosa
+    affiliation: University of North Carolina at Chapel Hill
+  - given-names: Luke
+    family-names: Piasecki
+    affiliation: University of North Carolina at Chapel Hill
+  - given-names: Nina
+    family-names: Dhillon
+    affiliation: University of North Carolina at Chapel Hill
+  - given-names: Michael
+    family-names: Kosorok
+    affiliation: University of North Carolina at Chapel Hill
+  - given-names: Wubin
+    family-names: Bai
+    affiliation: University of North Carolina at Chapel Hill
+repository-code: "https://github.com/BailabUNC/sensor_core"
+url: "https://github.com/BailabUNC/sensor_core"
+repository-artifact: "https://pypi.org/project/sensor-pipeline/"
+license: Apache-2.0
+version: 1.0.0
+date-released: "2026-01-13"
+keywords:
+  - sensors
+  - real-time
+  - data acquisition
+  - visualization
+  - signal processing
+  - biosensors
