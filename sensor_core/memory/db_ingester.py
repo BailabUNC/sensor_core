@@ -3,8 +3,8 @@ from typing import List, Optional, Tuple
 import numpy as np
 from sqlitedict import SqliteDict
 from .strg_manager import StorageManager
+from .stream_logger import MAGIC, VERSION as STREAM_VERSION
 
-MAGIC = b'SCBIN\x00\x00'
 MAGIC_LEN = len(MAGIC)
 REC_HEADER_SZ = 16
 
@@ -38,42 +38,44 @@ def _ensure_sqlite_keys_image(sqlite_path: str, shape: Tuple[int,int,int], dtype
         db.commit()
 
 def _ingest_file_line(path: str, sqlite_path: str, channel_keys: List[str],
-                      batch_frames: int, dtype: np.dtype, C: int, S: int,
+                      batch_frames: int, dtype: np.dtype, window: int, channels: int,
                       metrics_accum: dict):
+    if len(channel_keys) != channels:
+        raise ValueError(f"{len(channel_keys)} channel keys given for {channels} channels in {path}")
     _ensure_sqlite_keys_line(sqlite_path, channel_keys, dtype)
     sm = StorageManager(channel_key=channel_keys, filepath=sqlite_path, overwrite=False)
+    record_bytes = window * channels * dtype.itemsize
     acc = {k: [] for k in channel_keys}
     frames = 0; bytes_read = 0; batches = 0
+
+    def _flush():
+        for key in channel_keys:
+            if acc[key]:
+                sm.append_serial_channel(key, np.concatenate(acc[key], axis=0))
+                acc[key].clear()
+
     with open(path, 'rb') as fh:
-        ver, hdr, ver_b, len_b, payload = _read_header(fh)
+        _read_header(fh)
         while True:
             rec = fh.read(REC_HEADER_SZ)
-            if not rec: break
-            ts_ns, wi = struct.unpack('<QQ', rec)
-            raw = fh.read(S * C * dtype.itemsize)
-            if len(raw) < S * C * dtype.itemsize:
+            if len(rec) < REC_HEADER_SZ:
                 break
-            arr = np.frombuffer(raw, dtype=dtype, count=C*S).reshape(C, S)
+            ts_ns, wi = struct.unpack('<QQ', rec)
+            raw = fh.read(record_bytes)
+            if len(raw) < record_bytes:
+                break
+            frame = np.frombuffer(raw, dtype=dtype).reshape(window, channels)
             for ci, key in enumerate(channel_keys):
-                acc[key].append(arr[ci])
+                acc[key].append(frame[:, ci])
             frames += 1
             bytes_read += REC_HEADER_SZ + len(raw)
-            if sum(len(v) for v in acc.values()) >= batch_frames:
-                for key in channel_keys:
-                    if acc[key]:
-                        block = np.concatenate(acc[key], axis=0)
-                        sm.append_serial_channel(key, block)
-                        acc[key].clear()
+            if len(acc[channel_keys[0]]) >= batch_frames:
+                _flush()
                 batches += 1
-    for key in channel_keys:
-        if acc[key]:
-            block = np.concatenate(acc[key], axis=0)
-            sm.append_serial_channel(key, block)
-            acc[key].clear()
+    _flush()
     metrics_accum["frames_ingested"] = metrics_accum.get("frames_ingested", 0) + frames
     metrics_accum["bytes_read"] = metrics_accum.get("bytes_read", 0) + bytes_read
     metrics_accum["batches_flushed"] = metrics_accum.get("batches_flushed", 0) + batches
-    return ver_b, len_b, payload
 
 def _ingest_file_image(path: str, sqlite_path: str, shape: Tuple[int,int,int],
                        batch_frames: int, dtype: np.dtype, metrics_accum: dict):
@@ -109,6 +111,35 @@ def _ingest_file_image(path: str, sqlite_path: str, shape: Tuple[int,int,int],
     metrics_accum["bytes_read"] = metrics_accum.get("bytes_read", 0) + bytes_read
     metrics_accum["batches_flushed"] = metrics_accum.get("batches_flushed", 0) + batches
     return ver_b, len_b, payload
+
+def ingest_sealed_file(path: str, sqlite_path: str, channel_keys: List[str], batch_frames: int = 32):
+    """
+    Ingest one sealed stream file into SQLite, then truncate it back to its header
+    :return: (header, counts) -- the file's header, and counts of frames, bytes, and batches ingested
+    :raises ValueError: if the file was written in another format or does not match channel_keys
+    """
+    with open(path, 'rb') as fh:
+        ver, hdr, ver_b, len_b, payload = _read_header(fh)
+    if ver != STREAM_VERSION:
+        raise ValueError(f"{path} uses stream format version {ver}; this version of sensor_core reads version {STREAM_VERSION}")
+    dtype = np.dtype(hdr['dtype'])
+    shape = tuple(hdr['frame_shape'])
+    mode = hdr.get('data_mode', 'line')
+    counts = {"frames_ingested": 0, "bytes_read": 0, "batches_flushed": 0}
+    if mode == 'line':
+        _, window, channels = shape
+        _ingest_file_line(path, sqlite_path, channel_keys, batch_frames, dtype, window, channels, counts)
+    elif mode == 'image':
+        _ingest_file_image(path, sqlite_path, shape, batch_frames, dtype, counts)
+    else:
+        raise ValueError(f"{path} has unknown data_mode {mode!r}")
+
+    try: os.remove(_seal_path(path))
+    except FileNotFoundError: pass
+    with open(path, 'wb') as out:
+        out.write(MAGIC); out.write(ver_b); out.write(len_b); out.write(payload)
+    return hdr, counts
+
 
 def ingest_loop(file_a: str, file_b: str, sqlite_path: str, channel_keys: List[str],
                 batch_frames: int = 32, sleep_s: float = 0.2,
@@ -197,55 +228,30 @@ def ingest_loop(file_a: str, file_b: str, sqlite_path: str, channel_keys: List[s
             seal_b = _seal_path(file_b)
             _publish_scan(seal_a, seal_b)
             for path in files:
-                seal = _seal_path(path)
-                if os.path.exists(seal):
-                    with open(path, 'rb') as fh:
-                        try:
-                            ver, hdr, ver_b, len_b, payload = _read_header(fh)
-                            if metrics_proxy is not None:
-                                metrics_proxy.update({
-                                    "ingest_last_header": {
-                                        "path": os.path.abspath(path),
-                                        "data_mode": hdr.get('data_mode', 'line'),
-                                        "frame_shape": tuple(hdr.get('frame_shape', [])),
-                                        "dtype": hdr.get('dtype'),
-                                    }
-                                })
-                        except ValueError as e:
-                            if metrics_proxy is not None:
-                                metrics_proxy.update({
-                                    "ingest_last_error": f"HeaderError on {os.path.abspath(path)}: {e}",
-                                })
-                            continue
-                    dtype = np.dtype(hdr['dtype'])
-                    shape = tuple(hdr['frame_shape'])
-                    mode = hdr.get('data_mode', 'line')
-
-                    delta = {"frames_ingested": 0, "bytes_read": 0, "batches_flushed": 0}
-                    if mode == 'line':
-                        N, _, C = shape
-                        _ = _ingest_file_line(path, sqlite_path, channel_keys, batch_frames, dtype, N, C, delta)
-                    elif mode == 'image':
-                        H, W, Cimg = shape
-                        _ = _ingest_file_image(path, sqlite_path, (H, W, Cimg), batch_frames, dtype, delta)
-                    else:
-                        continue
-
+                if not os.path.exists(_seal_path(path)):
+                    continue
+                try:
+                    hdr, delta = ingest_sealed_file(path, sqlite_path, channel_keys, batch_frames)
+                except ValueError as e:
                     if metrics_proxy is not None:
-                        metrics_proxy.update({
-                            "ingest_bins_ingested": int(metrics_proxy["ingest_bins_ingested"]) + 1,
-                            "ingest_frames_ingested": int(metrics_proxy["ingest_frames_ingested"]) + int(delta["frames_ingested"]),
-                            "ingest_bytes_read": int(metrics_proxy["ingest_bytes_read"]) + int(delta["bytes_read"]),
-                            "ingest_batches_flushed": int(metrics_proxy["ingest_batches_flushed"]) + int(delta["batches_flushed"]),
-                        })
-                        _metrics_flush(force=True)
+                        metrics_proxy.update({"ingest_last_error": f"{os.path.abspath(path)}: {e}"})
+                    continue
 
-                    # truncate back to header
-                    try: os.remove(seal)
-                    except FileNotFoundError: pass
-                    with open(path, 'wb') as out:
-                        out.write(MAGIC); out.write(ver_b); out.write(len_b); out.write(payload)
-                    did_work = True
+                if metrics_proxy is not None:
+                    metrics_proxy.update({
+                        "ingest_last_header": {
+                            "path": os.path.abspath(path),
+                            "data_mode": hdr.get('data_mode', 'line'),
+                            "frame_shape": tuple(hdr.get('frame_shape', [])),
+                            "dtype": hdr.get('dtype'),
+                        },
+                        "ingest_bins_ingested": int(metrics_proxy["ingest_bins_ingested"]) + 1,
+                        "ingest_frames_ingested": int(metrics_proxy["ingest_frames_ingested"]) + int(delta["frames_ingested"]),
+                        "ingest_bytes_read": int(metrics_proxy["ingest_bytes_read"]) + int(delta["bytes_read"]),
+                        "ingest_batches_flushed": int(metrics_proxy["ingest_batches_flushed"]) + int(delta["batches_flushed"]),
+                    })
+                    _metrics_flush(force=True)
+                did_work = True
 
             if not did_work:
                 time.sleep(sleep_s)

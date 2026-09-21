@@ -167,28 +167,13 @@ class PlotManager(DictManager):
 
                 if self.data_mode == "line":
                     N, S = int(self.shape[0]), int(self.shape[1])
-                    K = int(np.ceil(N / max(1, S)))
-                    start = end - K + 1
-                    if start < 0:
+                    K = min(int(np.ceil(N / max(1, S))), cap)
+                    start = wi - lag - K
+                    traces = latest_line_traces(self.ring, self.ser_channel_key, self.plot_channel_key, N, lag)
+                    if traces is None:
                         return
 
-                    slot = start % cap
-                    first = min(K, cap - slot)
-                    win1 = self.ring.view_window(start, first)
-                    rest = K - first
-                    if rest:
-                        win2 = self.ring.view_window(start + first, rest)
-                        win = np.concatenate((win1, win2), axis=0)
-                    else:
-                        win = win1
-
                     self.metrics.update_drop_estimate(write_idx_now=wi, frames_read_this_tick=K)
-
-                    block = np.concatenate([win[i] for i in range(win.shape[0])], axis=1)  # (C, K*N)
-                    yblock = block[:, -N:]
-                    yblock = np.require(yblock, dtype=np.float32, requirements=["C"])
-                    if not yblock.flags["OWNDATA"]:
-                        yblock = yblock.copy()
 
                     ncols = int(np.shape(self.plot_channel_key)[1])
                     per_tick_gpu_ms = 0.0
@@ -205,7 +190,7 @@ class PlotManager(DictManager):
 
                         # Check DSP Pipeline
                         self._sync_plot_dsp_if_needed()
-                        y = yblock[i]
+                        y = np.asarray(traces[ch_key], dtype=np.float32)
                         if self._plot_dsp_local.dsp_modules_queue:
                             y = np.asarray(y, dtype=np.float32)
                             try:
@@ -246,16 +231,7 @@ class PlotManager(DictManager):
                         self._last_present = time.perf_counter()
                         return
 
-                    # handle wrap case
-                    slot = start % cap
-                    first = min(frames_to_read, cap - slot)
-                    win1 = self.ring.view_window(start, first)
-                    rest = frames_to_read - first
-                    if rest:
-                        win2 = self.ring.view_window(start + first, rest)
-                        win = np.concatenate((win1, win2), axis=0)
-                    else:
-                        win = win1
+                    win = self.ring.read_window(start, frames_to_read)
 
                     self.metrics.update_drop_estimate(write_idx_now=wi, frames_read_this_tick=frames_to_read)
                     latest = win[-1]

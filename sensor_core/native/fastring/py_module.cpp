@@ -1,4 +1,3 @@
-#include <array>
 #include <pybind11/pybind11.h>
 #include <pybind11/numpy.h>
 #include "ring.hpp"
@@ -26,28 +25,20 @@ PYBIND11_MODULE(_fastring, m) {
                 throw std::runtime_error("size not multiple of frame_bytes");
             r.publish(arr.data(), nbytes / r.frame_bytes);
         })
-        .def("view_frame", [](ShmRing& r, uint64_t logical_idx, py::ssize_t C, py::ssize_t S) {
-            size_t slot = (size_t)(logical_idx % r.capacity);
-            void* ptr = r.data + slot * r.frame_bytes;
-            const py::ssize_t itemsize = (py::ssize_t)sizeof(float);
-            const char* fmt = "f";
-            std::array<py::ssize_t, 2> shape   { C, S };
-            std::array<py::ssize_t, 2> strides { (py::ssize_t)(S * sizeof(float)), (py::ssize_t)sizeof(float) };
-            return py::memoryview::from_buffer(ptr, itemsize, fmt, shape, strides, /*readonly=*/true);
-        })
-        .def("view_window", [](ShmRing& r, uint64_t start, size_t frames, py::ssize_t C, py::ssize_t S) {
+        // Read-only bytes of `frames` consecutive frames starting at logical index `start`, as a
+        // uint8 array. The caller applies the dtype and shape, so every dtype works. The array's base
+        // is this ring, so the ring stays mapped for as long as the array or any view of it exists.
+        .def("view_bytes", [](py::object self, uint64_t start, size_t frames) {
+            ShmRing& r = self.cast<ShmRing&>();
             size_t slot = (size_t)(start % r.capacity);
-            if (slot + frames > r.capacity)
-                throw std::runtime_error("window wraps ring; split into two calls");
-            void* ptr = r.data + slot * r.frame_bytes;
-            const py::ssize_t itemsize = (py::ssize_t)sizeof(float);
-            const char* fmt = "f";
-            std::array<py::ssize_t, 3> shape   { (py::ssize_t)frames, C, S };
-            std::array<py::ssize_t, 3> strides {
-                (py::ssize_t)r.frame_bytes,
-                (py::ssize_t)(S * sizeof(float)),
-                (py::ssize_t)sizeof(float)
-            };
-            return py::memoryview::from_buffer(ptr, itemsize, fmt, shape, strides, /*readonly=*/true);
+            if (frames > r.capacity - slot)
+                throw std::runtime_error("window wraps the ring; split it into two calls");
+            py::array bytes(py::dtype::of<uint8_t>(),
+                            {(py::ssize_t)(frames * r.frame_bytes)},
+                            {(py::ssize_t)1},
+                            r.data + slot * r.frame_bytes,
+                            self);
+            bytes.attr("setflags")(py::arg("write") = false);
+            return bytes;
         });
 }

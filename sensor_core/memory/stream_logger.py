@@ -4,7 +4,7 @@ import numpy as np
 from .ring_adapter import RingBuffer
 
 MAGIC = b'SCBIN\x00\x00'
-VERSION = 1
+VERSION = 2  # 2: one record per frame (a whole acquisition in line mode), global frame indices
 
 def _ensure_parent(path: str):
     parent = os.path.dirname(os.path.abspath(path))
@@ -67,6 +67,7 @@ class BinaryStreamWriter:
         self._m_total_frames = 0
         self._m_total_bytes = 0
         self._m_rotations = 0
+        self._m_dropped_frames = 0
 
         # timers
         self._m_last_flush = time.monotonic()
@@ -83,7 +84,9 @@ class BinaryStreamWriter:
                 with open(f, 'wb') as fh: self._write_header(fh)
 
         for f in self.files:
-            if not os.path.exists(f) or os.path.getsize(f) == 0:
+            if not os.path.exists(f) or os.path.getsize(f) == 0 or not self._header_matches(f):
+                try: os.remove(_seal_path(f))
+                except FileNotFoundError: pass
                 with open(f, 'wb') as fh: self._write_header(fh)
 
         if os.path.exists(_seal_path(self.files[self._active])):
@@ -111,6 +114,22 @@ class BinaryStreamWriter:
         fh.flush()
         os.fsync(fh.fileno())
 
+    def _header_matches(self, path: str) -> bool:
+        """True if the stream file at path was written with this writer's format and frame layout"""
+        try:
+            with open(path, 'rb') as fh:
+                if fh.read(len(MAGIC)) != MAGIC:
+                    return False
+                version = struct.unpack('<H', fh.read(2))[0]
+                length = struct.unpack('<I', fh.read(4))[0]
+                header = json.loads(fh.read(length))
+        except (OSError, ValueError, struct.error):
+            return False
+        return (version == VERSION
+                and tuple(header.get('frame_shape', ())) == self.frame_shape
+                and header.get('dtype') == str(self.dtype)
+                and header.get('data_mode') == self.data_mode)
+
     def _publish_heartbeat(self, force=False):
         if self._metrics is None:
             return
@@ -129,6 +148,7 @@ class BinaryStreamWriter:
                 "writer_total_frames": int(self._m_total_frames),
                 "writer_total_bytes": int(self._m_total_bytes),
                 "writer_rotations": int(self._m_rotations),
+                "writer_dropped_frames": int(self._m_dropped_frames),
                 "writer_fps_estimate": float(fps),
                 "writer_last_rotation_unix": self._last_rotation_wall,
                 "writer_updated_unix": now,
@@ -169,7 +189,25 @@ class BinaryStreamWriter:
             self._fh.flush()
             self._rotate()
 
-    def write_frames(self, buf: memoryview, frame_bytes: int, start_idx: int, nframes: int, ts_ns: int):
+    def note_dropped(self, nframes: int):
+        """Record frames that were overwritten in the ring before they could be written"""
+        self._m_dropped_frames += int(nframes)
+        self._publish_heartbeat(force=True)
+
+    def close(self):
+        """Flush and close the active stream file"""
+        if self._fh is not None and not self._fh.closed:
+            self._fh.flush(); os.fsync(self._fh.fileno()); self._fh.close()
+
+    def write_frames(self, buf: memoryview, frame_bytes: int, first_index: int, nframes: int, ts_ns: int):
+        """
+        Append frames to the active stream file, one record per frame
+        :param buf: bytes of nframes consecutive frames
+        :param frame_bytes: size of one frame in bytes
+        :param first_index: global index of the first frame (the ring's write index when it was published)
+        :param nframes: number of frames in buf
+        :param ts_ns: timestamp stored with each frame
+        """
         if nframes <= 0:
             self._maybe_time_rotate()
             self._maybe_force_rotate()
@@ -183,7 +221,7 @@ class BinaryStreamWriter:
             can_write = min(remaining, max(1, self.rotate_frames - self._frames_written_in_active))
             for i in range(can_write):
                 off = (idx + i) * frame_bytes
-                self._fh.write(struct.pack('<QQ', ts_ns, (start_idx + idx + i)))
+                self._fh.write(struct.pack('<QQ', ts_ns, first_index + idx + i))
                 self._fh.write(b[off:off+frame_bytes])
             self._frames_written_in_active += can_write
             self._m_total_frames += can_write
@@ -200,6 +238,29 @@ class BinaryStreamWriter:
         self._maybe_time_rotate()
         self._maybe_force_rotate()
         self._publish_heartbeat(force=False)
+
+def drain_ring(ring: RingBuffer, writer: BinaryStreamWriter, last_idx: int) -> Tuple[int, int]:
+    """
+    Write every frame published since last_idx to the stream files
+    :return: (next_idx, dropped) -- the index to continue from, and how many frames were
+             overwritten in the ring before they could be written (also reported in metrics)
+    """
+    wi = int(ring.write_idx)
+    if wi == last_idx:
+        return last_idx, 0
+    cap = ring.capacity
+    start = max(last_idx, wi - cap)  # anything older has already been overwritten
+    dropped = max(0, start - last_idx)
+    if dropped:
+        writer.note_dropped(dropped)
+    ts_ns = time.time_ns()
+    idx = start
+    while idx < wi:
+        n = min(wi - idx, cap - idx % cap)  # stop at the end of the ring, then continue from slot 0
+        writer.write_frames(ring.view_window_bytes(idx, n), ring.frame_bytes, idx, n, ts_ns)
+        idx += n
+    return wi, dropped
+
 
 def dump_loop(file_a: str, file_b: str, shm_name: str, capacity_frames: int,
               frame_shape: Tuple[int, ...], dtype, data_mode: str = 'line',
@@ -221,38 +282,14 @@ def dump_loop(file_a: str, file_b: str, shm_name: str, capacity_frames: int,
                                     rotate_seconds=rotate_seconds, overwrite=overwrite,
                                     metrics_proxy=metrics_proxy, control_proxy=control_proxy)
         last_idx = int(ring.write_idx)
-        frame_bytes = ring.frame_bytes
         period = 1.0 / poll_hz
-        cap = int(capacity_frames)
-
-        def _write_window_wrapped(start: int, n: int, ts_ns: int):
-            if n <= 0:
-                return
-            end = (start + n)
-            if end <= cap:
-                buf = ring.view_window_bytes(start, n)
-                writer.write_frames(buf, frame_bytes, start, n, ts_ns)
-            else:
-                first = cap - start
-                second = end - cap
-                if first > 0:
-                    buf1 = ring.view_window_bytes(start, first)
-                    writer.write_frames(buf1, frame_bytes, start, first, ts_ns)
-                if second > 0:
-                    buf2 = ring.view_window_bytes(0, second)
-                    writer.write_frames(buf2, frame_bytes, 0, second, ts_ns)
 
         while True:
-            wi = int(ring.write_idx)
-            if wi != last_idx:
-                n = (wi - last_idx) % cap
-                if n > 0:
-                    start = (wi - n) % cap
-                    ts_ns = time.time_ns()
-                    _write_window_wrapped(start, n, ts_ns)
-                    last_idx = wi
-            else:
-                writer.write_frames(memoryview(b""), frame_bytes, 0, 0, time.time_ns())
+            next_idx, _ = drain_ring(ring, writer, last_idx)
+            if next_idx == last_idx:
+                # idle: still check time-based rotation and publish a heartbeat
+                writer.write_frames(memoryview(b""), ring.frame_bytes, next_idx, 0, time.time_ns())
+            last_idx = next_idx
             time.sleep(period)
     except Exception as e:
         if metrics_proxy is not None:

@@ -56,8 +56,12 @@ def test_image_frames_with_the_wrong_shape_are_rejected(data_manager):
         manager.acquire_data(func=lambda ser, frame_shape: np.zeros((5, 4, 1), np.uint8), data_mode="image")
 
 
-@pytest.mark.xfail(strict=True, reason="#57: any exception inside a custom acquisition function "
-                                       "is replaced by a misleading 'must accept: ser, frame_shape' error")
+def test_custom_functions_with_the_wrong_signature_are_rejected_clearly(data_manager):
+    manager = data_manager(KEYS, LINE_SHAPE)
+    with pytest.raises(ValueError, match="must accept: ser, frame_shape"):
+        manager.acquire_data(func=lambda port, shape: np.zeros((10, 3)))
+
+
 def test_errors_inside_a_custom_function_are_not_masked(data_manager):
     manager = data_manager(KEYS, LINE_SHAPE)
 
@@ -68,16 +72,12 @@ def test_errors_inside_a_custom_function_are_not_masked(data_manager):
         manager.acquire_data(func=acquire)
 
 
-@pytest.mark.xfail(strict=True, reason="#57: num_channel is derived from plot_channel_key, so plotting "
-                                       "a subset of channels rejects every acquisition")
 def test_plotting_a_subset_of_channels_still_acquires_every_channel(data_manager):
     manager = data_manager(KEYS, LINE_SHAPE, plot_channel_key=[["red", "infrared"]])
     frame = manager.acquire_data(func=lambda ser, frame_shape: np.zeros((10, 3)))
     assert frame.shape == (10, 3)
 
 
-@pytest.mark.xfail(strict=True, reason="#57: the built-in reader returns (num_points, channels), "
-                                       "but validation expects (window_size, channels)")
 def test_builtin_reader_returns_a_valid_line_frame(data_manager):
     manager = data_manager(KEYS, LINE_SHAPE)
     assert manager.acquire_data().shape == (10, 3)

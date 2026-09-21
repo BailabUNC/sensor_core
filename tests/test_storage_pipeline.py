@@ -10,14 +10,13 @@ import numpy as np
 import pytest
 
 from harness import image_frames, line_acquisitions
+from sensor_core.memory.db_ingester import ingest_sealed_file
 
 LINE_KEYS = ["red", "infrared", "violet"]
 LINE_SHAPE = (100, 10, 3)  # (num_points, window_size, channels), as in the example notebooks
 IMAGE_SHAPE = (6, 4, 1)
 
 
-@pytest.mark.xfail(strict=True, reason="#57: the ingester reads line records with the wrong size, so "
-                                       "stored samples do not match what was acquired")
 @pytest.mark.parametrize("acquisitions_per_poll", [1, 2, 8])
 def test_line_data_reaches_sqlite_unchanged(storage_pipeline, acquisitions_per_poll):
     pipeline = storage_pipeline(keys=LINE_KEYS, frame_shape=LINE_SHAPE, dtype=np.float32)
@@ -31,8 +30,53 @@ def test_line_data_reaches_sqlite_unchanged(storage_pipeline, acquisitions_per_p
         np.testing.assert_array_equal(pipeline.stored(key), acquisitions[:, :, channel].ravel())
 
 
-BATCH_CORRUPTION = ("#57: the writer's C++ view assumes 4-byte items, so batches of smaller items "
-                    "are stored as copies of earlier frames")
+@pytest.mark.parametrize("dtype", [np.int16, np.float64])
+def test_line_data_of_any_dtype_reaches_sqlite_unchanged(storage_pipeline, dtype):
+    pipeline = storage_pipeline(keys=LINE_KEYS, frame_shape=LINE_SHAPE, dtype=dtype)
+    acquisitions = line_acquisitions(6, window=10, channels=3).astype(dtype)
+    for batch in np.split(acquisitions, 3):
+        pipeline.publish(batch)
+        pipeline.drain()
+    pipeline.rotate()
+    pipeline.ingest()
+    for channel, key in enumerate(LINE_KEYS):
+        stored = pipeline.stored(key)
+        assert stored.dtype == dtype
+        np.testing.assert_array_equal(stored, acquisitions[:, :, channel].ravel())
+
+
+def test_line_data_survives_many_trips_around_a_small_ring(storage_pipeline):
+    pipeline = storage_pipeline(keys=LINE_KEYS, frame_shape=LINE_SHAPE, dtype=np.float32, capacity=8)
+    acquisitions = line_acquisitions(21, window=10, channels=3)
+    for batch in np.split(acquisitions, 7):
+        pipeline.publish(batch)
+        pipeline.drain()
+    pipeline.rotate()
+    pipeline.ingest()
+    assert pipeline.writer_metrics["writer_dropped_frames"] == 0
+    for channel, key in enumerate(LINE_KEYS):
+        np.testing.assert_array_equal(pipeline.stored(key), acquisitions[:, :, channel].ravel())
+
+
+def test_frames_overwritten_before_the_writer_reads_them_are_reported(storage_pipeline):
+    pipeline = storage_pipeline(keys=LINE_KEYS, frame_shape=LINE_SHAPE, dtype=np.float32, capacity=8)
+    acquisitions = line_acquisitions(12, window=10, channels=3)
+    pipeline.publish(acquisitions)  # the writer falls 12 frames behind an 8-frame ring
+    pipeline.drain()
+    pipeline.rotate()
+    pipeline.ingest()
+    assert pipeline.writer_metrics["writer_dropped_frames"] == 4
+    for channel, key in enumerate(LINE_KEYS):
+        np.testing.assert_array_equal(pipeline.stored(key), acquisitions[4:, :, channel].ravel())
+
+
+def test_ingesting_with_the_wrong_number_of_channel_keys_fails_loudly(storage_pipeline):
+    pipeline = storage_pipeline(keys=LINE_KEYS, frame_shape=LINE_SHAPE, dtype=np.float32)
+    pipeline.publish(line_acquisitions(2, window=10, channels=3))
+    pipeline.drain()
+    pipeline.rotate()
+    with pytest.raises(ValueError, match="2 channel keys given for 3 channels"):
+        ingest_sealed_file(pipeline.files[0], pipeline.sqlite_path, ["red", "infrared"])
 
 
 @pytest.mark.parametrize("dtype, frames_per_poll", [
@@ -40,9 +84,9 @@ BATCH_CORRUPTION = ("#57: the writer's C++ view assumes 4-byte items, so batches
     (np.float32, 8),
     (np.uint8, 1),
     (np.uint8, 4),
-    pytest.param(np.uint8, 8, marks=pytest.mark.xfail(strict=True, reason=BATCH_CORRUPTION)),
+    (np.uint8, 8),
     (np.uint16, 2),
-    pytest.param(np.uint16, 4, marks=pytest.mark.xfail(strict=True, reason=BATCH_CORRUPTION)),
+    (np.uint16, 4),
 ])
 def test_image_data_reaches_sqlite_unchanged(storage_pipeline, dtype, frames_per_poll):
     pipeline = storage_pipeline(keys=["camera"], frame_shape=IMAGE_SHAPE, dtype=dtype, data_mode="image")

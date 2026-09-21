@@ -1,38 +1,43 @@
 import numpy as np
 from sensor_core import _fastring as fastring
 
+
 class RingBuffer:
     """
-    Python adapter for C++ fastring class
-    Internally the native ring is always (C_flat, S_flat) with S_flat=1 for images.
+    Python adapter for the shared-memory ring buffer in sensor_core._fastring.
+
+    Each slot of the ring holds one frame:
+      line mode:  one acquisition, shaped (window_size, channels)
+      image mode: one image, shaped (height, width, channels)
     """
-    def __init__(self, 
-                 name, 
-                 capacity_frames, 
-                 frame_shape, 
-                 data_mode, 
-                 dtype, 
+    def __init__(self,
+                 name,
+                 capacity_frames,
+                 frame_shape,
+                 data_mode,
+                 dtype,
                  create=False):
         self.name = name
         self.capacity = int(capacity_frames)
-        self.logical_shape = tuple(frame_shape)
+        self.logical_shape = tuple(int(x) for x in frame_shape)
+        self.frame_shape = self.logical_shape
         self.dtype = np.dtype(dtype)
         self._mode = str(data_mode)
 
-        if (self._mode == "line"):
+        if self._mode == "line":
             N, S, C = self.logical_shape
-            self._N, self._S, self._C = int(N), int(S), int(C)
-            self.frame_shape = (int(N), int(S), int(C))
-        elif (self._mode == "image"):
+            self._N, self._S, self._C = N, S, C
+            self.slot_shape = (S, C)
+        elif self._mode == "image":
             H, W, C = self.logical_shape
-            self._H, self._W, self._Cimg = int(H), int(W), int(C)
-            self._S = self._H * self._W * self._Cimg
-            self.frame_shape = (self._H, self._W, self._Cimg)
+            self._H, self._W, self._Cimg = H, W, C
+            self.slot_shape = (H, W, C)
         else:
-            raise ValueError(f"frame_shape must be (N,S,C) or (H,W,C), got {self.logical_shape}")
+            raise ValueError(f"data_mode must be 'line' or 'image', got {data_mode!r}")
 
+        frame_bytes = int(np.prod(self.slot_shape)) * self.dtype.itemsize
         maker = fastring.Ring.create if create else fastring.Ring.open
-        self._ring = maker(self.name, int(self.capacity), int(self._S * self.dtype.itemsize))
+        self._ring = maker(self.name, self.capacity, frame_bytes)
 
     @property
     def write_idx(self) -> int:
@@ -44,79 +49,54 @@ class RingBuffer:
 
     def publish(self, arr):
         """
-        Publish array to ring buffer
-        :param arr: input array to store
+        Publish one frame, or a batch of image frames, to the ring buffer
+        :param arr: line mode: (window_size, channels), or (channels, window_size) which is transposed;
+                    image mode: (height, width, channels) or a batch (n, height, width, channels)
         """
         a = np.asarray(arr)
 
         if self._mode == "line":
-            if a.shape == (self._C, self._S):
+            if a.shape != self.slot_shape and a.shape == (self._C, self._S):
                 a = a.T
-            if a.shape != (self._S, self._C):
-                raise ValueError(f"publish LINE expects (S,C) got {a.shape}")
-            frame = np.ascontiguousarray(a, dtype=self.dtype)
-            self._ring.publish(frame)
+            if a.shape != self.slot_shape:
+                raise ValueError(f"publish LINE expects (S,C) = {self.slot_shape}, got {a.shape}")
+            self._ring.publish(np.ascontiguousarray(a, dtype=self.dtype))
             return
-        else:
-            # image mode
-            if a.ndim == 3:
-                if a.shape != (self._H, self._W, self._Cimg):
-                    raise ValueError(f"publish Image expects (H,W,C), got {a.shape}")
-                frame = np.ascontiguousarray(a, dtype=self.dtype)
-                self._ring.publish(frame)
-                return
 
-            if a.ndim == 4 and a.shape[1:] == (self._H, self._W, self._Cimg):
-                a = np.ascontiguousarray(a, dtype=self.dtype)
-                for i in range(a.shape[0]):
-                    self._ring.publish(a[i])
-                return
-
-            raise ValueError(f"publish Image expects (H,W,C) or (N,H,W,C), got {a.shape}")
+        if a.shape == self.slot_shape or (a.ndim == 4 and a.shape[1:] == self.slot_shape):
+            self._ring.publish(np.ascontiguousarray(a, dtype=self.dtype))
+            return
+        raise ValueError(f"publish Image expects (H,W,C) or (N,H,W,C) with (H,W,C) = {self.slot_shape}, got {a.shape}")
 
     def view_window(self, start: int, frames: int):
         """
-        Return a NumPy view of consecutive frames starting at start
-          Falls back to one copy if the underlying memoryview is not C-contiguous.
-        :param start: logical start index for view
-        :param frames: number of frames to show
+        Read-only NumPy view of consecutive frames, shaped (frames, *slot_shape)
+        :param start: logical index of the first frame
+        :param frames: number of frames; the window must not wrap past the end of the ring (see read_window)
         """
-        start = int(start)
         frames = int(frames)
+        if frames <= 0:
+            return np.empty((0, *self.slot_shape), dtype=self.dtype)
+        raw = self._ring.view_bytes(int(start), frames)  # uint8 array that keeps the ring mapped
+        return raw.view(self.dtype).reshape((frames, *self.slot_shape))
 
-        def _call_view(start_i, frames_i, dim0=None, dim1=None):
-            try:
-                return self._ring.view_window(start_i, frames_i)
-            except TypeError:
-                if dim0 is None or dim1 is None:
-                    raise
-                return self._ring.view_window(start_i, frames_i, int(dim0), int(dim1))
-
-        if self._mode == "line":
-            N, C = self._N, self._C
-            mv = _call_view(start, frames, C, N)
-            try:
-                arr = np.frombuffer(mv, dtype=self.dtype, count=frames * C * N)
-            except BufferError:
-                arr = np.frombuffer(mv.tobytes(), dtype=self.dtype, count=frames * C * N)
-            return arr.reshape(frames, C, N)
-
-        H, W, Cimg = self._H, self._W, self._Cimg
-        mv = _call_view(start, frames, H, W * Cimg)
-
-        elem_count = frames * H * W * Cimg
-        try:
-            arr = np.frombuffer(mv, dtype=self.dtype, count=elem_count)
-            arr = arr.reshape(frames, H, W, Cimg)
-            return arr
-        except BufferError:
-            arr = np.frombuffer(mv.tobytes(), dtype=self.dtype, count=elem_count)
-            return arr.reshape(frames, H, W, Cimg)
+    def read_window(self, start: int, frames: int):
+        """
+        Copy of consecutive frames, shaped (frames, *slot_shape), wrapping around the ring as needed
+        :param start: logical index of the first frame
+        :param frames: number of frames (at most the ring capacity)
+        """
+        start, frames = int(start), int(frames)
+        first = min(frames, self.capacity - start % self.capacity)
+        parts = [self.view_window(start, first)]
+        if frames > first:
+            parts.append(self.view_window(start + first, frames - first))
+        return np.concatenate(parts, axis=0)
 
     def view_window_bytes(self, start: int, frames: int):
+        """
+        Read-only bytes of consecutive frames, for writing them to disk without a copy
+        """
         if frames <= 0:
             return memoryview(b"")
-        if self._mode == 'line':
-            return self._ring.view_window(int(start), int(frames), int(self._C), int(self._S))
-        else:
-            return self._ring.view_window(int(start), int(frames), int(self._H), int(self._W * self._Cimg))
+        return memoryview(self._ring.view_bytes(int(start), int(frames)))

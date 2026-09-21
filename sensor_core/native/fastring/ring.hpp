@@ -3,6 +3,7 @@
 #include <atomic>
 #include <cstring>
 #include <stdexcept>
+#include <string>
 
 #ifdef _WIN32
     #include <windows.h>
@@ -161,7 +162,14 @@ struct ShmRing {
 
         r.hdr  = reinterpret_cast<RingHeader*>(r.base);
         r.data = r.base + sizeof(RingHeader);
-        return r; 
+        if (r.hdr->capacity != capacity || r.hdr->frame_bytes != frame_bytes) {
+            throw std::runtime_error(
+                std::string("ring layout mismatch: '") + name + "' was created with capacity " +
+                std::to_string(r.hdr->capacity) + " and frame_bytes " + std::to_string(r.hdr->frame_bytes) +
+                ", but opened with capacity " + std::to_string(capacity) +
+                " and frame_bytes " + std::to_string(frame_bytes));
+        }
+        return r;
     }
 
     void publish(const void* frames, size_t nframes) {

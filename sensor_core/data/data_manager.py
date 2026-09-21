@@ -83,25 +83,9 @@ class DataManager(SerialManager, DictManager, StorageManager):
                     continue
 
                 if self.data_mode=='line':
-                    arr = np.asarray(ys)
-                    if arr.ndim != 2:
-                        raise ValueError(f"[writer] ys ndim={arr.ndim}, expected 2 (N,C), got {arr.shape}")
-
-                    N_in, C_in = arr.shape
-                    N_ring, _, C_ring, = self.frame_shape  # ring frame is (N, C)
-
-                    if C_in != C_ring:
-                        raise ValueError(f"[writer] channels mismatch: ys (N,{C_in}), ring expects C={C_ring}")
-
-                    # Clamp to ring N
-                    N = min(N_in, N_ring)
-                    if N != N_ring:
-                        arr = arr[:N, :]
-
-                    # Confirm frame is contiguous and transpose, then publish to ring
-                    frame = np.ascontiguousarray(arr, dtype=self.dtype)
+                    # one acquisition, shaped (window_size, channels), fills one ring slot
                     with timer(lambda ms: self.metrics.note_publish(ms, write_idx=int(self.ring.write_idx))):
-                        self.ring.publish(frame)
+                        self.ring.publish(ys)
                 else:
                     with timer(lambda ms: self.metrics.note_publish(ms)):
                         self.ring.publish(np.asarray(ys, dtype=self.dtype))

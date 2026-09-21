@@ -16,7 +16,7 @@ def test_plot_keys_default_to_one_row_with_every_channel():
 
 
 def test_plot_keys_can_arrange_channels_in_a_grid():
-    grid = [["red", "infrared"], ["violet", "red"]]
+    grid = [["violet"], ["red"]]
     assert SensorManager.setup_channel_keys(KEYS, plot_channel_key=grid)[1] == grid
 
 

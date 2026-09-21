@@ -122,9 +122,8 @@ class DictManager(object):
                 setattr(self, f"{key}", self.args_dict[f"{key}"])
             except KeyError:
                 if key == "num_channel":
-                    num_channel = np.shape(self.args_dict["plot_channel_key"])[0] * \
-                                  np.shape(self.args_dict["plot_channel_key"])[1]
-                    setattr(self, f"{key}", num_channel)
+                    # every serial channel is acquired, whichever channels are plotted
+                    setattr(self, f"{key}", len(self.args_dict["ser_channel_key"]))
                 else:
                     setattr(self, f"{key}", None)
 
