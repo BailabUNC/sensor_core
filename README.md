@@ -41,6 +41,9 @@ times = StorageManager.load_frame_times(db, session=-1)          # acquisition t
 ```
 A line-mode frame is one acquisition of `window_size` samples, so each timestamp covers that many samples of every channel. Timestamps come from the host's monotonic clock, which all processes on the machine share, so streams recorded on the same computer can be aligned; `load_frame_times(..., clock="monotonic")` returns those values directly. The database is plain SQLite, readable from any language: a `sessions` table holds each run's settings and clock anchor, and a `frames` table holds one row per frame with its index, timestamp, and raw bytes. The format is described in [`strg_manager.py`](sensor_core/memory/strg_manager.py). For a complete script that acquires, stores, and checks data without a display, see [`examples/virtual_serial_port_line.py`](examples/virtual_serial_port_line.py).
 
+## Benchmarks
+[`benchmarks/`](benchmarks/README.md) measures how many frames per second are acquired, written to disk, stored in SQLite, and drawn by the live plot, for line and image data. It checks that every stored frame arrived intact, and it produces the performance figure in the paper; its README lists the exact commands.
+
 ## Running the Tests
 ```
 pip install -e ".[test]"
@@ -52,3 +55,10 @@ The ([![tests](https://github.com/BailabUNC/sensor_core/actions/workflows/tests.
 The following data was captured by [MABOS](https://github.com/BailabUNC/MABOS/tree/master): a proprietary biosensor we developed. 
 
 https://github.com/BailabUNC/MABOS_core/assets/96029511/cbcf4896-62dc-4e1d-8ed4-9be6ac47196a
+
+## Contributing
+Questions, bug reports, and suggestions are welcome as [GitHub issues](https://github.com/BailabUNC/sensor_core/issues). [CONTRIBUTING.md](CONTRIBUTING.md) explains how to set up a development environment, run the tests, and propose changes, and [CHANGELOG.md](CHANGELOG.md) lists the changes in each release.
+
+## Citing sensor_core
+If you use sensor_core in your research, please cite it. The citation is in [CITATION.cff](CITATION.cff); on GitHub, "Cite this repository" in the sidebar gives it in APA and BibTeX formats.
+

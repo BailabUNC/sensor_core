@@ -8,6 +8,7 @@ tests pin it down.
 """
 import shutil
 import threading
+import time
 
 import numpy as np
 import pytest
@@ -16,7 +17,7 @@ from harness import image_frames, line_acquisitions
 from sensor_core.memory.db_ingester import ingest_loop, ingest_segment
 from sensor_core.memory.mem_utils import initialize_ring
 from sensor_core.memory.stream_logger import dump_loop
-from sensor_core.memory.strg_manager import StorageManager, list_sessions
+from sensor_core.memory.strg_manager import StorageManager, list_sessions, load_frames
 
 LINE_KEYS = ["red", "infrared", "violet"]
 LINE_SHAPE = (100, 10, 3)  # (num_points, window_size, channels), as in the example notebooks
@@ -71,9 +72,10 @@ def test_frames_overwritten_before_the_writer_reads_them_are_reported(storage_pi
     pipeline.drain()
     pipeline.rotate()
     pipeline.ingest()
-    assert pipeline.writer_metrics["writer_dropped_frames"] == 4
+    # 4 frames were overwritten, and the oldest one left is skipped too: the producer could be rewriting it
+    assert pipeline.writer_metrics["writer_dropped_frames"] == 5
     for channel, key in enumerate(LINE_KEYS):
-        np.testing.assert_array_equal(pipeline.stored(key), acquisitions[4:, :, channel].ravel())
+        np.testing.assert_array_equal(pipeline.stored(key), acquisitions[5:, :, channel].ravel())
 
 
 def test_a_segment_stored_again_after_a_crash_is_not_duplicated(storage_pipeline, tmp_path):
@@ -176,3 +178,41 @@ def test_worker_loops_store_frames_published_before_and_while_they_run(tmp_path,
                                       acquisitions[:, :, channel].ravel())
     (session,) = list_sessions(sqlite_path)
     assert session["channels"] == LINE_KEYS and session["frames"] == 20
+
+
+def test_frames_overwritten_while_being_copied_are_dropped_not_stored(storage_pipeline):
+    # a producer thread laps a 16-frame ring while the writer stalls on every record, so frames are
+    # overwritten during the copy; those must be dropped and counted, never stored torn
+    shape = (64, 64, 1)
+    pipeline = storage_pipeline(keys=["camera"], frame_shape=shape, dtype=np.uint8, data_mode="image", capacity=16)
+    stop = threading.Event()
+
+    def produce():
+        frame, k = np.zeros(shape, np.uint8), 0
+        while not stop.is_set():
+            frame[...] = k % 251  # every byte of frame k holds k % 251
+            pipeline.ring.publish(frame)
+            k += 1
+
+    write = pipeline.writer._fh.write
+
+    def stalling_write(data):
+        if len(data) > 16:
+            time.sleep(0.0002)
+        return write(data)
+
+    pipeline.writer._fh.write = stalling_write
+    producer = threading.Thread(target=produce)
+    producer.start()
+    deadline = time.monotonic() + 1.0
+    while time.monotonic() < deadline:
+        pipeline.drain()
+    stop.set()
+    producer.join()
+    pipeline.drain()
+    pipeline.rotate()
+    pipeline.ingest()
+    index, _, frames = load_frames(pipeline.sqlite_path)
+    assert pipeline.writer_metrics["writer_dropped_frames"] > 0  # the writer really was overrun
+    for i, frame in zip(index, frames):
+        assert (frame == i % 251).all(), f"frame {i} was stored torn"

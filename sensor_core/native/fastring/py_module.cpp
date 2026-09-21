@@ -17,6 +17,9 @@ PYBIND11_MODULE(_fastring, m) {
         .def_property_readonly("frame_bytes", [](const ShmRing& r){ return r.frame_bytes; })
         .def_property_readonly("capacity", [](const ShmRing& r){ return r.capacity; })
         .def_property_readonly("write_idx", [](const ShmRing& r) {
+            // Reads of frames made before this call finish before the index is read, so a reader can
+            // copy frames first and then check whether the producer overwrote them meanwhile.
+            std::atomic_thread_fence(std::memory_order_acquire);
             return (uint64_t) r.hdr->write_idx.load(std::memory_order_acquire);
         })
         .def("publish", [](ShmRing& r, py::array arr, uint64_t ts_ns) {
