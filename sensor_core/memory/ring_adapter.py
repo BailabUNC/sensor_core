@@ -2,6 +2,13 @@ import numpy as np
 from sensor_core import _fastring as fastring
 
 
+def unlink_ring(name: str):
+    """
+    Remove a ring buffer's name so no new process can open it; existing mappings stay valid until released
+    """
+    fastring.Ring.unlink(name)
+
+
 class RingBuffer:
     """
     Python adapter for the shared-memory ring buffer in sensor_core._fastring.

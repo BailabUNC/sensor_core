@@ -1,14 +1,84 @@
-import time
+import atexit
 import os
+import time
+import uuid
+import warnings
+import multiprocessing
+import multiprocessing.util  # noqa: F401 -- registers multiprocessing's exit handler first, so ours runs before it
+from multiprocessing import Process, freeze_support
+from multiprocessing.managers import SyncManager
+from threading import Thread
+import pathlib
+
 from sensor_core.data import DataManager
 from sensor_core.memory.strg_manager import StorageManager
 from sensor_core.dsp.dsp_manager import DSPManager
 from sensor_core.memory.mem_utils import *
+from sensor_core.memory.ring_adapter import unlink_ring
 from sensor_core.utils.utils import *
 from sensor_core.utils.utils import _coerce
-from multiprocessing import Process, freeze_support, Manager
-from threading import Thread
-import pathlib
+
+# SensorManagers that have not been closed yet; any still open at interpreter exit are closed then
+_OPEN_MANAGERS = {}
+
+
+def _close_open_managers():
+    for manager in list(_OPEN_MANAGERS.values()):
+        try:
+            manager.close()
+        except Exception:
+            pass
+
+
+atexit.register(_close_open_managers)
+
+
+def _track_shared_memory(name: str):
+    """ Have Python's resource tracker remove the ring if this process exits without closing it
+    (POSIX only; Windows frees shared memory when its last handle closes)
+    """
+    if os.name == "posix":
+        try:
+            from multiprocessing import resource_tracker
+            resource_tracker.register(name, "shared_memory")
+        except Exception:
+            pass
+
+
+def _untrack_shared_memory(name: str):
+    if os.name == "posix":
+        try:
+            from multiprocessing import resource_tracker
+            resource_tracker.unregister(name, "shared_memory")
+        except Exception:
+            pass
+
+
+def _exit_with_parent():
+    """ Runs in the metrics server process: exit when the process that owns the SensorManager dies, so a
+    killed notebook kernel does not leave the server (and, through it, the shared memory) behind
+    """
+    parent = multiprocessing.parent_process()
+    if parent is not None:
+        Thread(target=lambda: (parent.join(), os._exit(0)), daemon=True).start()
+
+
+def _join(worker, timeout: float) -> bool:
+    """ Wait for a started Process or Thread; terminate a Process that does not finish in time
+    :return: True if the worker finished (or was never started)
+    """
+    if isinstance(worker, Thread):
+        if worker.ident is not None:
+            worker.join(timeout)
+        return not worker.is_alive()
+    if worker.pid is None:
+        return True
+    worker.join(timeout)
+    if worker.is_alive():
+        worker.terminate()
+        worker.join(5)
+        return False
+    return True
 
 
 class SensorManager(DataManager, StorageManager):
@@ -19,23 +89,43 @@ class SensorManager(DataManager, StorageManager):
                  dtype=np.float32,
                  data_mode: str = "line",
                  frame_shape: tuple = (1000, 100, 3),
-                 fast_stream_path_a: str = "./serial_stream_a.bin",
-                 fast_stream_path_b: str = "./serial_stream_b.bin",
+                 fast_stream_path_a: str = None,
+                 fast_stream_path_b: str = None,
                  start_stream_ingest: bool = False,
                  sqlite_path: str = "./serial_db.sqlite3",
                  rotate_frames: int = 8192,
                  rotate_seconds: float = 5.0,
+                 stream_dir: str = None,
+                 ring_capacity: int = 4096,
+                 shm_name: str = None,
                  **kwargs):
         """ Initialize SensorManager Class
-        Initializes serial port, shared memory object, and kwarg dictionary (args_dict)
-        :param serial_channel_key: list of serial channel names
+        Initializes serial port, shared memory object, and kwarg dictionary (args_dict).
+        Call close() when finished, or use `with SensorManager(...) as sm:`, to stop the worker
+        processes, store everything acquired, and release the shared memory.
+        :param ser_channel_key: list of serial channel names
         :param commport: target serial port
         :param baudrate: target data transfer rate (in bits/sec)
-        :param frame_shape: for line data, tuple of (num_points, window_size, num_channels); for image data, tuple of (height, width, num_channels)
         :param dtype: data type to store in shared memory object
+        :param data_mode: 'line' or 'image'
+        :param frame_shape: for line data, tuple of (num_points, window_size, num_channels); for image data, tuple of (height, width, num_channels)
+        :param start_stream_ingest: if True, store acquired data: frames stream to segment files in stream_dir and are ingested into sqlite_path
+        :param sqlite_path: SQLite database for stored data
+        :param rotate_frames: seal a stream segment after this many frames
+        :param rotate_seconds: seal a stream segment after this many seconds
+        :param stream_dir: directory for stream segments; defaults to a folder named after sqlite_path
+        :param ring_capacity: number of frames the shared-memory ring buffer holds
+        :param shm_name: name of the shared-memory ring buffer; a unique name is generated by default
+        :param fast_stream_path_a: deprecated and ignored; use stream_dir
+        :param fast_stream_path_b: deprecated and ignored; use stream_dir
         """
+        self._closed = True  # nothing to release until construction succeeds
+        self._stopped = False
         self.dtype = dtype
         self.data_mode = data_mode
+        if fast_stream_path_a is not None or fast_stream_path_b is not None:
+            warnings.warn("fast_stream_path_a and fast_stream_path_b are no longer used; "
+                          "stream files are written to stream_dir", DeprecationWarning, stacklevel=2)
 
         # Defines start method for multiprocessing. Necessary for windows and macOS
         self.os_flag = setup_process_start_method()
@@ -44,12 +134,38 @@ class SensorManager(DataManager, StorageManager):
         self.ser_channel_key, self.plot_channel_key = self.setup_channel_keys(
             ser_channel_key=ser_channel_key,
             **kwargs)
-        # Setup ring buffer
+
+        # Storage paths: frames stream to segments in stream_dir, which are ingested into sqlite_path
+        self.sqlite_path = os.path.abspath(sqlite_path)
+        self.stream_dir = (os.path.abspath(stream_dir) if stream_dir
+                           else os.path.splitext(self.sqlite_path)[0] + "_stream")
+        self.storage_enabled = bool(start_stream_ingest)
+        for other in list(_OPEN_MANAGERS.values()):
+            if self.storage_enabled and other.storage_enabled and other.stream_dir == self.stream_dir:
+                warnings.warn(f"closing the previous SensorManager that stored data through {self.stream_dir}",
+                              RuntimeWarning, stacklevel=2)
+                other.close()
+
+        # Setup ring buffer, with a name unique to this SensorManager
+        self.shm_name = shm_name or f"/sc_{os.getpid()}_{uuid.uuid4().hex[:8]}"
+        self.ring_capacity = int(ring_capacity)
         self.ring, self.logical_shape = initialize_ring(ser_channel_key=ser_channel_key,
                                                         dtype=dtype,
+                                                        shm_name=self.shm_name,
+                                                        frames_capacity=self.ring_capacity,
                                                         data_mode=data_mode,
                                                         frame_shape=frame_shape)
+        _track_shared_memory(self.shm_name)
+        try:
+            self._setup(commport, baudrate, rotate_frames, rotate_seconds, **kwargs)
+        except BaseException:
+            self._release()
+            raise
+        _OPEN_MANAGERS[id(self)] = self
+        self._closed = False
 
+    def _setup(self, commport, baudrate, rotate_frames, rotate_seconds, **kwargs):
+        """ Create the shared settings, metrics, and (when storing data) the writer and ingester processes """
         # Setup target consumer params and enforce
         plot_target_fps = kwargs.get("plot_target_fps", 60.0)
         plot_catch_up_max = kwargs.get("plot_catchup_base_max", 2048)
@@ -64,11 +180,11 @@ class SensorManager(DataManager, StorageManager):
                                                    plot_channel_key=self.plot_channel_key,
                                                    commport=commport,
                                                    baudrate=baudrate,
-                                                   shm_name='/sensor_ring',
+                                                   shm_name=self.shm_name,
                                                    shape=self.logical_shape,
-                                                   dtype=dtype,
-                                                   ring_capacity=4096,
-                                                   data_mode=data_mode,
+                                                   dtype=self.dtype,
+                                                   ring_capacity=self.ring_capacity,
+                                                   data_mode=self.data_mode,
                                                    frame_shape=self.logical_shape
                                                    )
 
@@ -79,16 +195,15 @@ class SensorManager(DataManager, StorageManager):
                                                    )
 
         # Make shared proxies for metrics
-        self._mp_manager = Manager()
+        self._mp_manager = SyncManager()
+        self._mp_manager.start(initializer=_exit_with_parent)
         self.writer_metrics_proxy = self._mp_manager.dict()
         self.plot_metrics_proxy = self._mp_manager.dict()
         self.ingest_metrics_proxy = self._mp_manager.dict()
-        self.stream_ctrl_proxy = self._mp_manager.dict()
         # Initialize proxies
         self.writer_metrics_proxy.update({"init": True})
         self.plot_metrics_proxy.update({"init": True})
-        self.ingest_metrics_proxy.update({"init": True})
-        self.stream_ctrl_proxy.update({"force_rotate": False})
+        self.ingest_metrics_proxy.update({"init": True, "ingest_config_enabled": self.storage_enabled})
 
         # Make shared proxy for DSP
         self._plot_dsp = DSPManager()
@@ -101,89 +216,56 @@ class SensorManager(DataManager, StorageManager):
             "modules": {},
         })
 
-        # Derive default bin paths
-        if start_stream_ingest and (fast_stream_path_a is None or fast_stream_path_b is None):
-            base = pathlib.Path(sqlite_path).with_suffix('').as_posix()
-            fast_stream_path_a = fast_stream_path_a or f"{base}_stream_a.bin"
-            fast_stream_path_b = fast_stream_path_b or f"{base}_stream_b.bin"
+        # Signals to the worker processes
+        self._acquire_stop = multiprocessing.Event()
+        self._writer_stop = multiprocessing.Event()
+        self._ingest_stop = multiprocessing.Event()
+        self._seal_request = multiprocessing.Event()
+        self._writer_ready = multiprocessing.Event()
+        self._ingest_ready = multiprocessing.Event()
+        self._acquire_workers = []
+        self._plot_workers = []
+        self._plot_managers = []
+        self._stream_proc = None
+        self._ingest_proc = None
 
-        # Normalize ALL paths to absolute
-        if sqlite_path is not None:
-            sqlite_path = os.path.abspath(sqlite_path)
-        if fast_stream_path_a is not None:
-            fast_stream_path_a = os.path.abspath(fast_stream_path_a)
-        if fast_stream_path_b is not None:
-            fast_stream_path_b = os.path.abspath(fast_stream_path_b)
-
-        self.fast_stream_path_a = fast_stream_path_a
-        self.fast_stream_path_b = fast_stream_path_b
-        self.sqlite_path = sqlite_path
-
-        auto_enable_for_image = (self.data_mode.lower() == "image")
-        ingest_enabled = bool(start_stream_ingest or auto_enable_for_image)
-
-        # Setup on-disk dual bytestream
-        try:
-            from sensor_core.memory.stream_logger import dump_loop as _dump_loop
-            ring_args = self.static_args_dict
-            shm_name = ring_args.get('shm_name', '/sensor_ring')
-            capacity = int(ring_args.get('ring_capacity', 4096))
-            frame_shape = ring_args.get('logical_shape', self.logical_shape)
-            _dtype = ring_args.get("dtype", dtype)
-            self._stream_proc = Process(target=_dump_loop,
-                                        args=(fast_stream_path_a, fast_stream_path_b, shm_name, capacity, frame_shape,
-                                              _dtype),
-                                        kwargs={'overwrite': False,
-                                                'rotate_frames': int(rotate_frames),
-                                                'rotate_seconds': float(rotate_seconds) if rotate_seconds else None,
-                                                'metrics_proxy': self.writer_metrics_proxy,
-                                                'control_proxy': self.stream_ctrl_proxy,
-                                                'data_mode': self.data_mode,
-                                                })
+        if self.storage_enabled:
+            from sensor_core.memory.stream_logger import dump_loop
+            from sensor_core.memory.db_ingester import ingest_loop
+            self._stream_proc = Process(name="stream_writer", target=dump_loop,
+                                        args=(self.stream_dir, self.shm_name, self.ring_capacity,
+                                              self.logical_shape, self.dtype),
+                                        kwargs={"data_mode": self.data_mode,
+                                                "rotate_frames": int(rotate_frames),
+                                                "rotate_seconds": float(rotate_seconds) if rotate_seconds else None,
+                                                "metrics_proxy": self.writer_metrics_proxy,
+                                                "stop_event": self._writer_stop,
+                                                "seal_event": self._seal_request,
+                                                "ready_event": self._writer_ready,
+                                                "start_idx": 0})
+            self._ingest_proc = Process(name="stream_ingester", target=ingest_loop,
+                                        args=(self.stream_dir, self.sqlite_path, list(self.ser_channel_key)),
+                                        kwargs={"metrics_proxy": self.ingest_metrics_proxy,
+                                                "data_mode_hint": self.data_mode,
+                                                "frame_shape_hint": self.logical_shape,
+                                                "dtype_hint": self.dtype,
+                                                "precreate_sqlite": True,
+                                                "stop_event": self._ingest_stop,
+                                                "ready_event": self._ingest_ready})
             self.start_process(self._stream_proc)
-        except Exception as e:
-            print(f'[SensorManager] failed to start stream logger: {e}')
-            self._stream_proc = None
+            self.start_process(self._ingest_proc)
+            # Wait until both can accept data, so a worker that cannot start fails here, loudly
+            self._wait_until_ready(self._stream_proc, self._writer_ready, "writer")
+            self._wait_until_ready(self._ingest_proc, self._ingest_ready, "ingest")
 
-        if start_stream_ingest:
-            if ingest_enabled:
-                try:
-                    from sensor_core.memory.db_ingester import ingest_loop as _ingest_loop
-                    ch_keys = list(self.ser_channel_key) if isinstance(self.ser_channel_key,
-                                                                       (list, tuple, np.ndarray)) else [
-                        self.ser_channel_key]
-                    frame_shape = ring_args.get('logical_shape', self.logical_shape)
-                    _dtype = ring_args.get("dtype", dtype)
-                    # TO DO: change away from 'hint' and just call them the actual kwargs (i.e. frame_shape, data_mode)
-                    self._ingest_proc = Process(target=_ingest_loop,
-                                                args=(fast_stream_path_a, fast_stream_path_b, sqlite_path, ch_keys),
-                                                kwargs={'metrics_proxy': self.ingest_metrics_proxy,
-                                                        'data_mode_hint': data_mode,
-                                                        'frame_shape_hint': frame_shape,
-                                                        'dtype_hint': _dtype,
-                                                        'precreate_sqlite': True
-                                                        })
-                    self.ingest_metrics_proxy.update({
-                        "ingest_config_enabled": True,
-                        "ingest_config_reason": ("explicit_flag" if start_stream_ingest else "auto_image_mode")
-                    })
-                    self.start_process(self._ingest_proc)
-                except Exception as e:
-                    print(f'[SensorManager] failed to start stream ingester: {e}')
-                    self.ingest_metrics_proxy.update({
-                        "ingest_config_enabled": True,
-                        "ingest_last_error": f"spawn_failed: {e.__class__.__name__}: {e}",
-                    })
-        else:
-            self._ingest_proc = None
-            self.ingest_metrics_proxy.update({
-                "ingest_config_enabled": False,
-                "ingest_config_reason": "disabled_by_config"
-            })
-
-        if self._ingest_proc is not None:
-            t = Thread(target=self._watch_ingester, daemon=True)
-            t.start()
+    def _wait_until_ready(self, proc, ready, name, timeout: float = 120.0):
+        deadline = time.monotonic() + timeout
+        while not ready.wait(0.05):
+            if not proc.is_alive():
+                error = self.writer_metrics_proxy if name == "writer" else self.ingest_metrics_proxy
+                raise RuntimeError(f"the stream {name} failed to start: {error.get(f'{name}_last_error')}")
+            if time.monotonic() > deadline:
+                raise TimeoutError(f"the stream {name} did not start within {timeout:.0f} s")
 
     @staticmethod
     def setup_channel_keys(ser_channel_key, **kwargs):
@@ -219,6 +301,8 @@ class SensorManager(DataManager, StorageManager):
         :param func: optional custom function to handle serial data acquisition
         :return: pointer to process
         """
+        if self._stopped:
+            raise RuntimeError("this SensorManager has been stopped; create a new one to acquire again")
         if save_data and (filepath is not None):
             filetype = pathlib.Path(filepath).suffix
             if filetype != ".hdf5" and filetype != ".sqlite3":
@@ -234,12 +318,15 @@ class SensorManager(DataManager, StorageManager):
         if self.os_flag == 'win':
             p = Thread(name='update',
                        target=odm.online_update_data,
-                       args=(func,))
+                       args=(func,),
+                       kwargs={"stop_event": self._acquire_stop},
+                       daemon=True)
         else:
             p = Process(name='update',
                         target=odm.online_update_data,
-                        args=(func,))
-
+                        args=(func,),
+                        kwargs={"stop_event": self._acquire_stop})
+        self._acquire_workers.append(p)
         return p
 
     def setup_plotting_process(self):
@@ -253,11 +340,13 @@ class SensorManager(DataManager, StorageManager):
                          plot_dsp_proxy=self.plot_dsp_proxy, )
         if self.os_flag == 'win':
             p = Thread(name='plot',
-                       target=pm.online_plot_data)
+                       target=pm.online_plot_data,
+                       daemon=True)
         else:
             p = Process(name='plot',
                         target=pm.online_plot_data)
-
+        self._plot_managers.append(pm)
+        self._plot_workers.append(p)
         return p, pm.fig
 
     def start_process(self, process):
@@ -271,17 +360,123 @@ class SensorManager(DataManager, StorageManager):
         else:
             process.start()
 
+    def flush(self, timeout: float = 30.0):
+        """ Wait until every frame published so far is stored in the SQLite database
+
+        Acquisition keeps running. Raises TimeoutError if storage does not catch up within timeout seconds.
+        """
+        if not self.storage_enabled:
+            raise RuntimeError("storage is off; create the SensorManager with start_stream_ingest=True")
+        if self._stopped:
+            return  # stop() already stored everything
+        target = self.ring.write_idx
+        seals = self.writer_metrics_proxy.get("writer_seal_count", 0)
+        rejected = self.ingest_metrics_proxy.get("ingest_segments_rejected", 0)
+        self._seal_request.set()
+        deadline = time.monotonic() + timeout
+
+        def wait_for(done, worker, name):
+            while not done():
+                if not worker.is_alive():
+                    raise RuntimeError(f"the stream {name} stopped: {self.get_metrics()[name].get(f'{name}_last_error')}")
+                if time.monotonic() > deadline:
+                    raise TimeoutError(f"flush timed out waiting for the stream {name}; see get_metrics()")
+                time.sleep(0.02)
+
+        wait_for(lambda: (self.writer_metrics_proxy.get("writer_seal_count", 0) > seals
+                          and self.writer_metrics_proxy.get("writer_seal_idx", -1) >= target),
+                 self._stream_proc, "writer")
+        sealed = self.writer_metrics_proxy.get("writer_sealed_seq", 0)
+        wait_for(lambda: self.ingest_metrics_proxy.get("ingest_last_seq", 0) >= sealed,
+                 self._ingest_proc, "ingest")
+        if self.ingest_metrics_proxy.get("ingest_segments_rejected", 0) > rejected:
+            raise RuntimeError(f"a stream segment could not be stored: {self.ingest_metrics_proxy.get('ingest_last_error')}")
+
+    def stop(self, timeout: float = 30.0):
+        """ Stop acquisition and plotting, then store everything acquired so far
+
+        Workers stop in order, so nothing in flight is lost: acquisition, the stream writer (which writes
+        the rest of the ring and seals its last segment), then the ingester (which stores every segment).
+        Safe to call more than once.
+        """
+        if self._stopped or self._closed:
+            return
+        self._stopped = True
+        self._acquire_stop.set()
+        for worker in self._acquire_workers:
+            _join(worker, timeout)
+        for pm in self._plot_managers:
+            pm.stop()
+        for worker in self._plot_workers:
+            _join(worker, timeout)
+        if self._stream_proc is not None:
+            self._writer_stop.set()
+            _join(self._stream_proc, timeout)
+        if self._ingest_proc is not None:
+            self._ingest_stop.set()
+            _join(self._ingest_proc, timeout)
+        try:
+            self._final_metrics = self.get_metrics()
+        except Exception:
+            pass
+
+    def close(self, timeout: float = 30.0):
+        """ Stop everything (see stop()), then release the shared memory and helper processes
+
+        Safe to call more than once; also called automatically when the interpreter exits.
+        """
+        if self._closed:
+            return
+        try:
+            self.stop(timeout)
+        finally:
+            self._release()
+
+    def _release(self):
+        self._closed = True
+        _OPEN_MANAGERS.pop(id(self), None)
+        manager = getattr(self, "_mp_manager", None)
+        if manager is not None:
+            try:
+                manager.shutdown()
+            except Exception:
+                pass
+        self._acquire_workers = []
+        self._plot_workers = []
+        if getattr(self, "ring", None) is not None:
+            self.ring = None
+            unlink_ring(self.shm_name)
+            _untrack_shared_memory(self.shm_name)
+
+    @property
+    def closed(self) -> bool:
+        """True once close() has run"""
+        return self._closed
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        self.close()
+
     def get_metrics(self) -> dict:
-        """Return a combined metrics snapshot."""
-        return {
+        """Return a combined metrics snapshot (the final one once the SensorManager is closed)."""
+        if self._closed:
+            return getattr(self, "_final_metrics", {"writer": {}, "plot": {}, "ingest": {}})
+        metrics = {
             "writer": dict(self.writer_metrics_proxy),
             "plot": dict(self.plot_metrics_proxy),
             "ingest": dict(self.ingest_metrics_proxy),
         }
+        # a worker that died cannot report it, so check it here
+        for name, proc in (("writer", self._stream_proc), ("ingest", self._ingest_proc)):
+            if proc is not None and not proc.is_alive() and not self._stopped:
+                metrics[name][f"{name}_alive"] = False
+        return metrics
 
     def force_seal_now(self):
-        """Request the writer to seal current bin and switch immediately."""
-        self.stream_ctrl_proxy.update({"force_rotate": True})
+        """Ask the writer to seal the active stream segment now, so the ingester can store it."""
+        self._seal_request.set()
 
     def debug_status(self) -> dict:
         return {
@@ -294,23 +489,10 @@ class SensorManager(DataManager, StorageManager):
                 "alive": (self._ingest_proc.is_alive() if self._ingest_proc else False),
             },
             "paths": {
-                "bin_a": self.fast_stream_path_a,
-                "bin_b": self.fast_stream_path_b,
+                "stream_dir": self.stream_dir,
                 "sqlite": self.sqlite_path,
             },
         }
-
-    def _watch_ingester(self):
-        while True:
-            time.sleep(1.0)
-            if not (self._ingest_proc and self._ingest_proc.is_alive()):
-                self.ingest_metrics_proxy.update({
-                    "ingest_alive": False,
-                    "ingest_last_error": self.ingest_metrics_proxy.get("ingest_last_error",
-                                                                       "ingester process not alive"),
-                    "ingest_updated_unix": time.time(),
-                })
-                break
 
     def _publish_plot_dsp_cfg(self):
         self._plot_dsp_version += 1

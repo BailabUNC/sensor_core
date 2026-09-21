@@ -6,6 +6,7 @@ from sensor_core.serial import SerialManager
 from sensor_core.utils import DictManager
 from sensor_core.memory.strg_manager import StorageManager
 from time import perf_counter
+import multiprocessing
 import time, traceback
 
 
@@ -68,10 +69,20 @@ class DataManager(SerialManager, DictManager, StorageManager):
                                virtual_ser_port=virtual_ser_port)
         self.setup_serial()
 
-    def online_update_data(self, func=None):
+    def online_update_data(self, func=None, stop_event=None):
+        """ Acquire frames and publish them to the ring buffer until stop_event is set
+        :param func: optional custom acquisition function, called as func(ser=..., frame_shape=...)
+        :param stop_event: multiprocessing.Event that ends the loop when set
+        """
         last_push = perf_counter()
         last_log = time.time()
-        while True:
+        parent = multiprocessing.parent_process()
+        next_parent_check = 0.0
+        while stop_event is None or not stop_event.is_set():
+            if parent is not None and perf_counter() >= next_parent_check:
+                if not parent.is_alive():
+                    break  # the process that owns the ring is gone
+                next_parent_check = perf_counter() + 0.5
             try:
                 with timer(lambda ms: self.metrics.add_acquire_ms(ms)):
                     ys = self.acquire_data(func=func,

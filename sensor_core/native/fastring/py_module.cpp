@@ -11,6 +11,9 @@ PYBIND11_MODULE(_fastring, m) {
         .def_static("open", [](const std::string& name, size_t cap, size_t fbytes) {
             return ShmRing::open(name.c_str(), cap, fbytes);
         })
+        .def_static("unlink", [](const std::string& name) {
+            ShmRing::unlink(name.c_str());
+        })
         .def_property_readonly("frame_bytes", [](const ShmRing& r){ return r.frame_bytes; })
         .def_property_readonly("capacity", [](const ShmRing& r){ return r.capacity; })
         .def_property_readonly("write_idx", [](const ShmRing& r) {

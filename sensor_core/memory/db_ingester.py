@@ -1,14 +1,13 @@
 import os, json, struct, time, traceback
+import multiprocessing
 from typing import List, Optional, Tuple
 import numpy as np
 from sqlitedict import SqliteDict
 from .strg_manager import StorageManager
-from .stream_logger import MAGIC, VERSION as STREAM_VERSION
+from .stream_logger import MAGIC, VERSION as STREAM_VERSION, sealed_segments, _safe_update
 
 MAGIC_LEN = len(MAGIC)
 REC_HEADER_SZ = 16
-
-def _seal_path(p: str) -> str: return p + ".seal"
 
 def _read_header(fh):
     magic = fh.read(MAGIC_LEN)
@@ -89,7 +88,8 @@ def _ingest_file_image(path: str, sqlite_path: str, shape: Tuple[int,int,int],
         ver, hdr, ver_b, len_b, payload = _read_header(fh)
         while True:
             rec = fh.read(REC_HEADER_SZ)
-            if not rec: break
+            if len(rec) < REC_HEADER_SZ:
+                break
             ts_ns, wi = struct.unpack('<QQ', rec)
             raw = fh.read(frame_items * dtype.itemsize)
             if len(raw) < frame_items * dtype.itemsize:
@@ -112,14 +112,14 @@ def _ingest_file_image(path: str, sqlite_path: str, shape: Tuple[int,int,int],
     metrics_accum["batches_flushed"] = metrics_accum.get("batches_flushed", 0) + batches
     return ver_b, len_b, payload
 
-def ingest_sealed_file(path: str, sqlite_path: str, channel_keys: List[str], batch_frames: int = 32):
+def ingest_segment(path: str, sqlite_path: str, channel_keys: List[str], batch_frames: int = 32):
     """
-    Ingest one sealed stream file into SQLite, then truncate it back to its header
-    :return: (header, counts) -- the file's header, and counts of frames, bytes, and batches ingested
-    :raises ValueError: if the file was written in another format or does not match channel_keys
+    Ingest one sealed segment into SQLite, then delete it
+    :return: (header, counts) -- the segment's header, and counts of frames, bytes, and batches ingested
+    :raises ValueError: if the segment was written in another format or does not match channel_keys
     """
     with open(path, 'rb') as fh:
-        ver, hdr, ver_b, len_b, payload = _read_header(fh)
+        ver, hdr, _, _, _ = _read_header(fh)
     if ver != STREAM_VERSION:
         raise ValueError(f"{path} uses stream format version {ver}; this version of sensor_core reads version {STREAM_VERSION}")
     dtype = np.dtype(hdr['dtype'])
@@ -133,63 +133,104 @@ def ingest_sealed_file(path: str, sqlite_path: str, channel_keys: List[str], bat
         _ingest_file_image(path, sqlite_path, shape, batch_frames, dtype, counts)
     else:
         raise ValueError(f"{path} has unknown data_mode {mode!r}")
-
-    try: os.remove(_seal_path(path))
-    except FileNotFoundError: pass
-    with open(path, 'wb') as out:
-        out.write(MAGIC); out.write(ver_b); out.write(len_b); out.write(payload)
+    os.remove(path)
     return hdr, counts
 
 
-def ingest_loop(file_a: str, file_b: str, sqlite_path: str, channel_keys: List[str],
+def ingest_pending_segments(stream_dir: str, sqlite_path: str, channel_keys: List[str],
+                            batch_frames: int = 32, on_ingested=None, on_rejected=None) -> int:
+    """
+    Ingest every sealed segment in stream_dir, oldest first
+    A segment that cannot be ingested is renamed to *.rejected so it neither blocks later segments nor
+    is retried forever; its data stays on disk for inspection.
+    :param on_ingested: optional callback(seq, header, counts) after each segment is stored
+    :param on_rejected: optional callback(seq, path, error) for each segment set aside
+    :return: number of segments processed
+    """
+    processed = 0
+    for seq, path in sealed_segments(stream_dir):
+        try:
+            hdr, counts = ingest_segment(path, sqlite_path, channel_keys, batch_frames)
+        except ValueError as e:
+            os.replace(path, path + ".rejected")
+            if on_rejected is not None:
+                on_rejected(seq, path, e)
+        else:
+            if on_ingested is not None:
+                on_ingested(seq, hdr, counts)
+        processed += 1
+    return processed
+
+
+def ingest_loop(stream_dir: str, sqlite_path: str, channel_keys: List[str],
                 batch_frames: int = 32, sleep_s: float = 0.2,
                 metrics_proxy: Optional[dict] = None,
                 data_mode_hint: Optional[str] = None,
                 frame_shape_hint: Optional[Tuple[int, ...]] = None,
                 dtype_hint: Optional[str] = None,
-                precreate_sqlite: bool = True):
+                precreate_sqlite: bool = True,
+                stop_event=None, ready_event=None):
+    """
+    Ingester process: move sealed segments from stream_dir into SQLite until stop_event is set
+    :param stop_event: when set, ingest every remaining sealed segment and return
+    :param ready_event: set once the ingester is running
+    """
+    totals = {"segments": 0, "frames": 0, "bytes": 0, "batches": 0, "rejected": 0}
+    rate = {"frames": 0, "t": time.monotonic()}
 
-    try:
-        # initialize metrics immediately
-        if metrics_proxy is not None:
-            metrics_proxy.update({
-                "ingest_bins_ingested": 0,
-                "ingest_frames_ingested": 0,
-                "ingest_bytes_read": 0,
-                "ingest_batches_flushed": 0,
-                "ingest_fps_estimate": 0.0,
+    def _on_ingested(seq, hdr, counts):
+        totals["segments"] += 1
+        totals["frames"] += int(counts["frames_ingested"])
+        totals["bytes"] += int(counts["bytes_read"])
+        totals["batches"] += int(counts["batches_flushed"])
+        _safe_update(metrics_proxy, {
+            "ingest_last_seq": int(seq),
+            "ingest_last_header": {
+                "data_mode": hdr.get('data_mode', 'line'),
+                "frame_shape": tuple(hdr.get('frame_shape', [])),
+                "dtype": hdr.get('dtype'),
+            },
+            "ingest_segments_ingested": totals["segments"],
+            "ingest_frames_ingested": totals["frames"],
+            "ingest_bytes_read": totals["bytes"],
+            "ingest_batches_flushed": totals["batches"],
+            "ingest_updated_unix": time.time(),
+        })
+
+    def _on_rejected(seq, path, error):
+        totals["rejected"] += 1
+        _safe_update(metrics_proxy, {
+            "ingest_last_seq": int(seq),
+            "ingest_segments_rejected": totals["rejected"],
+            "ingest_last_error": f"{os.path.abspath(path)}: {error}",
+        })
+
+    def _publish_rate(force=False):
+        now = time.monotonic()
+        dt = now - rate["t"]
+        if force or dt >= 1.0:
+            _safe_update(metrics_proxy, {
+                "ingest_fps_estimate": float((totals["frames"] - rate["frames"]) / max(1e-6, dt)),
+                "ingest_pending_segments": len(sealed_segments(stream_dir)),
+                "ingest_alive": True,
                 "ingest_updated_unix": time.time(),
-                "ingest_alive": True,
-                "ingest_watch_paths": [os.path.abspath(file_a), os.path.abspath(file_b)],
-                "ingest_sqlite_path": os.path.abspath(sqlite_path),
-                "ingest_started": True,
             })
-    except Exception:
-        pass
+            rate["frames"], rate["t"] = totals["frames"], now
 
+    _safe_update(metrics_proxy, {
+        "ingest_alive": True,
+        "ingest_started": True,
+        "ingest_stream_dir": os.path.abspath(stream_dir),
+        "ingest_sqlite_path": os.path.abspath(sqlite_path),
+        "ingest_segments_ingested": 0,
+        "ingest_frames_ingested": 0,
+        "ingest_bytes_read": 0,
+        "ingest_batches_flushed": 0,
+        "ingest_fps_estimate": 0.0,
+        "ingest_updated_unix": time.time(),
+    })
+    parent = multiprocessing.parent_process()
     try:
-        if metrics_proxy is not None:
-            metrics_proxy.update({
-                "ingest_alive": True,
-                "ingest_starting": False
-            })
-
-        def _publish_scan(seal_a: str, seal_b: str):
-            if metrics_proxy is None:
-                return
-
-            exists_a = os.path.exists(seal_a);
-            exists_b = os.path.exists(seal_b)
-            mt_a = os.path.getmtime(seal_a) if exists_a else None
-            mt_b = os.path.getmtime(seal_b) if exists_b else None
-            metrics_proxy.update({
-                "ingest_scan_seals": [seal_a, seal_b],
-                "ingest_scan_exists": [exists_a, exists_b],
-                "ingest_scan_mtime": [mt_a, mt_b],
-                "ingest_alive": True,
-                "ingest_updated_unix": time.time(),
-            })
-
         if precreate_sqlite:
             try:
                 if (data_mode_hint or '').lower() == 'image':
@@ -199,69 +240,27 @@ def ingest_loop(file_a: str, file_b: str, sqlite_path: str, channel_keys: List[s
                     _ensure_sqlite_keys_line(sqlite_path, channel_keys, np.dtype(dtype_hint or np.float32))
             except Exception:
                 pass
+        if ready_event is not None:
+            ready_event.set()
 
-        last_frames_total = 0
-        last_t = time.monotonic()
-
-        def _metrics_flush(force=False):
-            nonlocal last_frames_total, last_t
-            if metrics_proxy is None:
-                return
-            now = time.monotonic()
-            dt = now - last_t
-            if force or dt >= 1.0:
-                frames_total = int(metrics_proxy.get("ingest_frames_ingested", 0))
-                fps = (frames_total - last_frames_total) / max(1e-6, dt)
-                metrics_proxy.update({
-                    "ingest_fps_estimate": float(fps),
-                    "ingest_updated_unix": time.time(),
-                    "ingest_alive": True,
-                    "ingest_starting": False,
-                })
-                last_frames_total = frames_total
-                last_t = now
-
-        files = [file_a, file_b]
         while True:
-            did_work = False
-            seal_a = _seal_path(file_a)
-            seal_b = _seal_path(file_b)
-            _publish_scan(seal_a, seal_b)
-            for path in files:
-                if not os.path.exists(_seal_path(path)):
-                    continue
-                try:
-                    hdr, delta = ingest_sealed_file(path, sqlite_path, channel_keys, batch_frames)
-                except ValueError as e:
-                    if metrics_proxy is not None:
-                        metrics_proxy.update({"ingest_last_error": f"{os.path.abspath(path)}: {e}"})
-                    continue
-
-                if metrics_proxy is not None:
-                    metrics_proxy.update({
-                        "ingest_last_header": {
-                            "path": os.path.abspath(path),
-                            "data_mode": hdr.get('data_mode', 'line'),
-                            "frame_shape": tuple(hdr.get('frame_shape', [])),
-                            "dtype": hdr.get('dtype'),
-                        },
-                        "ingest_bins_ingested": int(metrics_proxy["ingest_bins_ingested"]) + 1,
-                        "ingest_frames_ingested": int(metrics_proxy["ingest_frames_ingested"]) + int(delta["frames_ingested"]),
-                        "ingest_bytes_read": int(metrics_proxy["ingest_bytes_read"]) + int(delta["bytes_read"]),
-                        "ingest_batches_flushed": int(metrics_proxy["ingest_batches_flushed"]) + int(delta["batches_flushed"]),
-                    })
-                    _metrics_flush(force=True)
-                did_work = True
-
-            if not did_work:
-                time.sleep(sleep_s)
-            _metrics_flush(force=False)
+            stopping = (stop_event is not None and stop_event.is_set()) or \
+                       (parent is not None and not parent.is_alive())
+            processed = ingest_pending_segments(stream_dir, sqlite_path, channel_keys, batch_frames,
+                                                on_ingested=_on_ingested, on_rejected=_on_rejected)
+            if processed:
+                _publish_rate(force=True)
+                continue
+            if stopping:
+                break  # a full pass after the stop request found nothing left to ingest
+            _publish_rate()
+            time.sleep(sleep_s)
     except Exception as e:
-        if metrics_proxy is not None:
-            metrics_proxy.update({
-                "ingest_alive": False,
-                "ingest_last_error": f"{e.__class__.__name__}: {e}",
-                "ingest_last_traceback": ''.join(traceback.format_exc())[-2000:],
-                "ingest_updated_unix": time.time(),
-                "ingest_starting": False,
-            })
+        _safe_update(metrics_proxy, {
+            "ingest_alive": False,
+            "ingest_last_error": f"{e.__class__.__name__}: {e}",
+            "ingest_last_traceback": ''.join(traceback.format_exc())[-2000:],
+            "ingest_updated_unix": time.time(),
+        })
+    finally:
+        _safe_update(metrics_proxy, {"ingest_alive": False, "ingest_updated_unix": time.time()})

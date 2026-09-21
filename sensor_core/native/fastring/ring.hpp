@@ -172,6 +172,15 @@ struct ShmRing {
         return r;
     }
 
+    // Remove the ring's name so no new process can open it. Processes that already mapped the
+    // ring keep their mapping until they release it. Windows frees the mapping automatically
+    // once its last handle closes, so there is nothing to remove there.
+    static void unlink(const char* name) {
+#ifndef _WIN32
+        shm_unlink(name);
+#endif
+    }
+
     void publish(const void* frames, size_t nframes) {
         const uint8_t* src = static_cast<const uint8_t*>(frames);
         uint64_t idx = hdr->write_idx.load(std::memory_order_relaxed);

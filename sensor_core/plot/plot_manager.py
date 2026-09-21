@@ -56,6 +56,7 @@ class PlotManager(DictManager):
         self._metrics_proxy = metrics_proxy
         self._last_push = 0.0
         self._last_read_idx = None
+        self._stopped = False
 
         # Register animation once (you had this twice)
         self.fig.add_animations(self.online_plot_data)
@@ -144,7 +145,13 @@ class PlotManager(DictManager):
                 if self._image is None:
                     self._image = subplot.graphics[-1]
 
+    def stop(self):
+        """ Stop updating the figure; it keeps showing the last frame drawn """
+        self._stopped = True
+
     def online_plot_data(self, *_, **__):
+        if self._stopped:
+            return
         target_fps = float(getattr(self, "plot_target_fps", 60.0))
         min_dt = 1.0/max(1e-6, target_fps)
         now = time.perf_counter()
