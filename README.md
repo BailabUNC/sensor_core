@@ -1,15 +1,15 @@
 # sensor_core
 A Python-based package for the acquisition, digital signal processing, plotting, and storage of sensor data in realtime.
-*Please see [fastplotlib](https://github.com/kushalkolar/fastplotlib/tree/), developed by Kushal Kolar, to learn more about the plotting library we primarily use.*
+*Please see [fastplotlib](https://github.com/fastplotlib/fastplotlib), developed by Kushal Kolar, Caitlin Lewis, and contributors, to learn more about the plotting library we primarily use.*
 
 # Key Features
 1.) **Custom Serial Acquisition** - Users can write and pass their own acquisition handler into the sensor_core pipeline. Refer to the [custom serial handler notebook](examples/custom_serial_acquisition.ipynb).
 
-2.) **Digital Signal Processing Integration** - sensor_core has a DSPManager hook enabling custom or predefined DSP algorithms to be applied prior to visualization without affecting the underlying datastream. Refer to the [DSP notebok](examples/virtual_serial_port_line_dsp.ipynb).
+2.) **Digital Signal Processing Integration** - custom or predefined DSP algorithms can be applied to the live plot with `sm.add_plot_dsp_module(...)`, without affecting the stored data. Refer to the [DSP notebook](examples/virtual_serial_port_line_dsp.ipynb).
 
-3.) **High-Speed Visualization** - using fastplotlib, we can reliably visualize 2- and 3-D data at high speed. We have thus far tested only in Jupyter Notebooks. Refer to the [line](examples/virtual_serial_port_line.ipynb) and [image](examples/virtual_serial_port_image.ipynb) notebooks for visualization examples.
+3.) **High-Speed Visualization** - using fastplotlib, we can reliably visualize 2- and 3-D data at high speed. Live plots are displayed in Jupyter notebooks. Refer to the [line](examples/virtual_serial_port_line.ipynb) and [image](examples/virtual_serial_port_image.ipynb) notebooks for visualization examples.
 
-4.) **High-Bandwidth Storage** - sensor_core creates temporary .bin files to stream data rapidly to before offloading to a sqlite file, enabling stable long term storage while imposing minimal delay in the real-time processing pipeline. Refer to the [line](examples/virtual_serial_port_line.ipynb) and [image](examples/virtual_serial_port_image.ipynb) notebooks for storage examples.
+4.) **High-Bandwidth Storage** - sensor_core streams frames to short segment files on disk while a separate process stores each segment in SQLite, so storage imposes minimal delay on the real-time pipeline. See [Storing and Loading Data](#storing-and-loading-data) and refer to the [line](examples/virtual_serial_port_line.ipynb) and [image](examples/virtual_serial_port_image.ipynb) notebooks for storage examples.
 ## Installation
 sensor_core requires Python 3.10 or newer. It is published on PyPI as `sensor-pipeline` and imported as `sensor_core`:
 ```
@@ -21,13 +21,36 @@ pip install "sensor-pipeline[notebook]"
 ```
 Prebuilt wheels cover Python 3.10–3.13 on Linux (x86_64), macOS (Apple silicon), and Windows (x64). On other platforms, pip builds from source, which requires a C++17 compiler.
 
+## Quick Start
+Write a function that returns one acquisition, an array of `window_size` samples for each channel, and hand it to a `SensorManager`. This one simulates a three-channel sensor, stores five seconds of data, and reads it back:
+```python
+import time
+import numpy as np
+from sensor_core import SensorManager
+from sensor_core.memory.strg_manager import StorageManager
+
+def acquire_data(ser, frame_shape):
+    time.sleep(0.01)  # a real sensor would be read from the serial port `ser` here
+    return np.random.rand(frame_shape[1], frame_shape[2]).astype(np.float32)  # (window_size, channels)
+
+if __name__ == "__main__":
+    with SensorManager(ser_channel_key=["red", "infrared", "violet"], commport=None,
+                       frame_shape=(1000, 10, 3),  # samples plotted, samples per acquisition, channels
+                       start_stream_ingest=True, sqlite_path="quickstart.sqlite3") as sm:
+        sm.start_process(sm.update_data_process(virtual_ser_port=True, func=acquire_data))
+        time.sleep(5)
+    red = StorageManager.load_serial_channel("red", "quickstart.sqlite3", session=-1)
+    print(f"{len(red)} samples of the red channel stored")
+```
+For a real device, pass its serial port as `commport` and read from `ser` in `acquire_data`. To plot live in a Jupyter notebook, call `sm.create_plot().show()` after starting acquisition. The [example notebooks](examples/) show each step.
+
 ## Developer Installation
 ```
 git clone https://github.com/BailabUNC/sensor_core
 cd sensor_core
-pip install -e ".[notebook]"
+pip install -e ".[notebook,test]"
 ```
-Python changes take effect immediately. After editing the C++ sources in `sensor_core/native/fastring/`, rerun the install command to rebuild the extension.
+Python changes take effect immediately. After editing the C++ sources in `sensor_core/native/fastring/`, rerun the install command to rebuild the extension. [CONTRIBUTING.md](CONTRIBUTING.md) covers development in more detail.
 
 ## Storing and Loading Data
 With `start_stream_ingest=True`, acquired frames are stored in the SQLite database at `sqlite_path`. Call `sm.flush()` to store everything acquired so far without stopping, and `sm.close()` when finished (or create the manager with `with SensorManager(...) as sm:`). Each run is stored as a session, and every frame keeps the time it was acquired:

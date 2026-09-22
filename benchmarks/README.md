@@ -44,7 +44,8 @@ Each run takes about two minutes. The image run needs about 10 GB of free disk; 
 before it starts and deletes its data afterwards. The disk it measures is the one holding `--workdir`
 (a temporary directory by default).
 
-The files in `results/` were measured on the machine described in each file's `environment` section.
+The files in `results/` were measured on the machine described in each file's `environment` section,
+which also records the git commit measured (and whether the working tree had uncommitted changes).
 Your numbers will depend on your CPU, disk, and GPU; what should hold on any machine that sustains
 these rates is that nothing is dropped, every frame is stored intact, and the storage lag stays bounded.
 

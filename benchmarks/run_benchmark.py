@@ -115,8 +115,11 @@ def describe_machine(args, workdir):
         here = os.path.dirname(os.path.abspath(__file__))
         commit = subprocess.run(["git", "rev-parse", "HEAD"], cwd=here, capture_output=True,
                                 text=True, timeout=10).stdout.strip() or None
+        changes = subprocess.run(["git", "status", "--porcelain", "--untracked-files=no"], cwd=here,
+                                 capture_output=True, text=True, timeout=10).stdout.strip()
+        uncommitted = bool(changes) if commit else None
     except (OSError, subprocess.SubprocessError):
-        commit = None
+        commit = uncommitted = None
     return {
         "measured_at": datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds"),
         "note": args.note,
@@ -127,6 +130,7 @@ def describe_machine(args, workdir):
         "memory_gb": memory_gb,
         "disk_free_gb": round(shutil.disk_usage(workdir).free / 2**30, 1),
         "git_commit": commit,
+        "git_uncommitted_changes": uncommitted,  # if true, git_commit does not fully describe the code measured
         "packages": {name: version(name) for name in
                      ("sensor-pipeline", "numpy", "scipy", "fastplotlib", "pygfx", "wgpu")},
     }
@@ -204,6 +208,9 @@ def run(args, workdir, keys, frame, frame_shape, plot_bytes, options):
     config.update({"frame_shape": list(frame.shape), "dtype": str(frame.dtype), "frame_bytes": frame.nbytes,
                    "plot_bytes_per_update": plot_bytes if args.plot else None})
     environment = describe_machine(args, workdir)
+    if environment["git_uncommitted_changes"]:
+        print("Note: sensor_core has uncommitted changes, so the recorded git commit does not fully describe "
+              "the code being measured. Commit them first for results that others can reproduce.")
 
     samples = {"acquired": [], "written": [], "stored": [], "rendered": []}
     sm = SensorManager(ser_channel_key=keys, commport=None, frame_shape=frame_shape, start_stream_ingest=True,
