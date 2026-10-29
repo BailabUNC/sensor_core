@@ -55,6 +55,6 @@ markers = [
 ]
 
 [tool.cibuildwheel]
-build = "cp310-* cp311-* cp312-* cp313-*"
+build = "cp310-* cp311-* cp312-* cp313-* cp314-*"
 skip = "*musllinux* pp*"
 test-command = 'python -X faulthandler -c "from sensor_core import SensorManager; import sensor_core._fastring"'

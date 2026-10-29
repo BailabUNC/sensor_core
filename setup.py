@@ -17,6 +17,7 @@ ext_modules = [
         cxx_std=17,
         define_macros=[("PYBIND11_DETAILED_ERROR_MESSAGES", "1")],
         extra_compile_args=extra_compile_args,
+        libraries=["rt"] if sys.platform.startswith("linux") else [],
     ),
 ]
 
