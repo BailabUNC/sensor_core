@@ -1,6 +1,6 @@
 # When the JOSS paper is published, add a preferred-citation entry with its DOI, so that
 # GitHub's "Cite this repository" button cites the paper. Update version and date-released at each release.
-cff-version: 1.2.0
+cff-version: 2.0.0
 message: "If you use sensor_core in your research, please cite it as below."
 type: software
 title: sensor_core
@@ -37,8 +37,8 @@ repository-code: "https://github.com/BailabUNC/sensor_core"
 url: "https://github.com/BailabUNC/sensor_core"
 repository-artifact: "https://pypi.org/project/sensor-pipeline/"
 license: Apache-2.0
-version: 1.0.0
-date-released: "2026-01-13"
+version: 2.0.0
+date-released: "2026-10-29"
 keywords:
   - sensors
   - real-time

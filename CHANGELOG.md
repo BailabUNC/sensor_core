@@ -4,9 +4,9 @@ Notable changes to sensor_core are listed here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow
 [Semantic Versioning](https://semver.org/). Changes before 1.0.0 are not recorded.
 
-## [Unreleased]
+## [2.0.0] - 2026-10-29
 
-To be released as 2.0.0: the storage format and several interfaces changed, and databases written by
+Released as 2.0.0: the storage format and several interfaces changed, and databases written by
 1.x cannot be read.
 
 ### Added
@@ -80,3 +80,5 @@ First release on PyPI, as `sensor-pipeline`.
 
 [Unreleased]: https://github.com/BailabUNC/sensor_core/compare/v1.0.0...HEAD
 [1.0.0]: https://github.com/BailabUNC/sensor_core/releases/tag/v1.0.0
+
+[2.0.0]: https://github.com/BailabUNC/sensor_core/compare/v1.0.0...v2.0.0
